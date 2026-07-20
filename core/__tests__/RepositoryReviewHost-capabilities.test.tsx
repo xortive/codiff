@@ -5,6 +5,7 @@
 import { act } from 'react';
 import { beforeEach, expect, test, vi } from 'vite-plus/test';
 import type { CodiffConfig } from '../config/types.ts';
+import { parseWalkthroughModel } from '../lib/narrative-walkthrough-schema.ts';
 import {
   resolveRepositoryReviewBootstrap,
   type RepositoryReviewBootstrap,
@@ -272,6 +273,7 @@ const getSurfaceProps = () => {
   expect(props).toBeDefined();
   return props!;
 };
+const getSurfaceWalkthrough = () => parseWalkthroughModel(getSurfaceProps().snapshot.walkthrough);
 
 test('routes every resolved Electron review source through the shared surface', async () => {
   const sources = [
@@ -820,9 +822,7 @@ test('an unchanged refresh preserves hydrated files and in-flight content and wa
       });
       await walkthrough.promise;
     });
-    await waitFor(() =>
-      expect(getSurfaceProps().snapshot.walkthrough.title).toBe('Preserved work'),
-    );
+    await waitFor(() => expect(getSurfaceWalkthrough().title).toBe('Preserved work'));
     expect(getSurfaceProps().capabilities?.content?.itemVersionByKey).toEqual({
       'src/stable.ts': 1,
     });
@@ -925,7 +925,7 @@ test('changed reviews keep the old walkthrough until an explicit replacement fin
       expect(getSurfaceProps().snapshot.files.map((file) => file.path)).toEqual(['src/first.ts']),
     );
     expect(api.getNarrativeWalkthrough).not.toHaveBeenCalled();
-    expect(getSurfaceProps().snapshot.walkthrough.title).toBe('Initial walkthrough');
+    expect(getSurfaceWalkthrough().title).toBe('Initial walkthrough');
     expect(view.container.querySelector('.repository-refresh-banner.stale')).not.toBeNull();
 
     const restart = () =>
@@ -950,7 +950,7 @@ test('changed reviews keep the old walkthrough until an explicit replacement fin
       await firstWalkthrough.promise;
     });
     await waitFor(() => expect(getSurfaceProps().capabilities?.walkthrough?.status).toBe('ready'));
-    expect(getSurfaceProps().snapshot.walkthrough.title).toBe('Initial walkthrough');
+    expect(getSurfaceWalkthrough().title).toBe('Initial walkthrough');
     expect(view.container.querySelector('.repository-refresh-banner.stale')).not.toBeNull();
 
     await act(async () => restart()?.click());
@@ -962,9 +962,7 @@ test('changed reviews keep the old walkthrough until an explicit replacement fin
       });
       await secondWalkthrough.promise;
     });
-    await waitFor(() =>
-      expect(getSurfaceProps().snapshot.walkthrough.title).toBe('Current walkthrough'),
-    );
+    await waitFor(() => expect(getSurfaceWalkthrough().title).toBe('Current walkthrough'));
     expect(view.container.querySelector('.repository-refresh-banner.stale')).toBeNull();
   } finally {
     await view.cleanup();
@@ -1142,7 +1140,7 @@ test('cancels active walkthrough work when History switches sources', async () =
       await pending.promise;
     });
     expect(getSurfaceProps().snapshot.repository.source).toEqual(sourceB);
-    expect(getSurfaceProps().snapshot.walkthrough.title).not.toBe('Stale source A walkthrough');
+    expect(getSurfaceWalkthrough().title).not.toBe('Stale source A walkthrough');
     expect(getSurfaceProps().capabilities?.walkthrough).toMatchObject({
       status: 'idle',
       unread: false,
@@ -1413,7 +1411,7 @@ test('keeps a newer walkthrough request active when an older request fails', asy
       await newer.promise;
     });
     await waitFor(() => expect(getSurfaceProps().capabilities?.walkthrough?.status).toBe('ready'));
-    expect(getSurfaceProps().snapshot.walkthrough.title).toBe('Newer result');
+    expect(getSurfaceWalkthrough().title).toBe('Newer result');
   } finally {
     await view.cleanup();
   }
@@ -1517,7 +1515,7 @@ test('uses the configured agent for placeholder walkthroughs and honors launch o
     const view = await renderHost(state, config);
     try {
       await waitFor(() => expect(surfaceProps).toHaveBeenCalled());
-      expect(getSurfaceProps().snapshot.walkthrough.agent).toBe(agentBackend);
+      expect(getSurfaceWalkthrough().agent).toBe(agentBackend);
     } finally {
       await view.cleanup();
     }
@@ -1532,12 +1530,12 @@ test('uses the configured agent for placeholder walkthroughs and honors launch o
   });
   try {
     await waitFor(() => expect(surfaceProps).toHaveBeenCalled());
-    expect(getSurfaceProps().snapshot.walkthrough.agent).toBe('claude');
+    expect(getSurfaceWalkthrough().agent).toBe('claude');
 
     const nextConfig = createDefaultConfig();
     nextConfig.settings.agentBackend = 'pi';
     await view.rerenderConfig(nextConfig);
-    expect(getSurfaceProps().snapshot.walkthrough.agent).toBe('claude');
+    expect(getSurfaceWalkthrough().agent).toBe('claude');
   } finally {
     await view.cleanup();
   }
@@ -1550,7 +1548,7 @@ test('uses the configured agent for placeholder walkthroughs and honors launch o
     const nextConfig = createDefaultConfig();
     nextConfig.settings.agentBackend = 'opencode';
     await configuredView.rerenderConfig(nextConfig);
-    await waitFor(() => expect(getSurfaceProps().snapshot.walkthrough.agent).toBe('opencode'));
+    await waitFor(() => expect(getSurfaceWalkthrough().agent).toBe('opencode'));
   } finally {
     await configuredView.cleanup();
   }
