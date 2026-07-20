@@ -6,8 +6,6 @@ import type {
   DiffComparisonAnalysis,
   DiffComparisonView,
   ReviewCommitEvolution,
-  ReviewCommitSummary,
-  ReviewEvolutionUnit,
   ReviewPlan,
   ReviewVersionOption,
 } from '@nkzw/codiff-core/types';
@@ -16,6 +14,7 @@ import {
   diffComparison,
   diffComparisonView,
   diffRange,
+  projectCommitEvolution,
   resolveReviewPlan,
   reviewVersionOption,
   revisionRef,
@@ -1569,137 +1568,7 @@ export const projectMergeRequestVersionRef = (
     ...(version.previousNumber != null ? { previousNumber: version.previousNumber } : {}),
   });
 
-const projectCommitSummary = (commit: Algorithmish | undefined): ReviewCommitSummary | undefined => {
-  if (!commit) return undefined;
-  return {
-    authorName: commit.authorName,
-    authoredAt: commit.authoredAt,
-    parentIds: commit.parentIds ?? [],
-    sha: commit.sha,
-    shortSha: commit.shortSha,
-    subject: commit.subject,
-    webUrl: commit.webUrl,
-    ...(commit.diffStat ? { diffStat: commit.diffStat } : {}),
-  };
-};
-
-type Algorithmish = {
-  authorName: string;
-  authoredAt: string;
-  diffStat?: { additions: number; deletions: number; filesChanged: number };
-  parentIds?: ReadonlyArray<string>;
-  sha: string;
-  shortSha: string;
-  subject: string;
-  webUrl?: string;
-};
-
-export const projectEvolutionUnit = (unit: {
-  after?: Algorithmish;
-  baseCommit?: Algorithmish;
-  before?: Algorithmish;
-  confidence: 'exact' | 'high' | 'unmatched';
-  id: string;
-  kind: string;
-  matchReasons?: ReadonlyArray<string>;
-  matchScore?: number;
-  order: number;
-  rebaseDrivers?: ReadonlyArray<{
-    authorName: string;
-    authoredAt: string;
-    overlappingPaths: ReadonlyArray<string>;
-    sha: string;
-    shortSha: string;
-    subject: string;
-    webUrl?: string;
-  }>;
-  reviewable: boolean;
-}): ReviewEvolutionUnit => {
-  const common = {
-    confidence: unit.confidence,
-    id: unit.id,
-    order: unit.order,
-    ...(unit.matchReasons ? { matchReasons: unit.matchReasons } : {}),
-    ...(unit.matchScore != null ? { matchScore: unit.matchScore } : {}),
-  } as const;
-  if (unit.kind === 'added' || unit.kind === 'introduced') {
-    return {
-      ...common,
-      after: projectCommitSummary(unit.after)!,
-      kind: 'introduced',
-      reviewable: true,
-    };
-  }
-  if (unit.kind === 'removed') {
-    return {
-      ...common,
-      before: projectCommitSummary(unit.before)!,
-      kind: 'removed',
-      reviewable: true,
-    };
-  }
-  if (unit.kind === 'likely-revised' || unit.kind === 'revised') {
-    return {
-      ...common,
-      after: projectCommitSummary(unit.after)!,
-      before: projectCommitSummary(unit.before)!,
-      kind: 'revised',
-      reviewable: true,
-      ...(unit.rebaseDrivers
-        ? {
-            rebaseDrivers: unit.rebaseDrivers.map((driver) => ({
-              authorName: driver.authorName,
-              authoredAt: driver.authoredAt,
-              overlappingPaths: driver.overlappingPaths,
-              sha: driver.sha,
-              shortSha: driver.shortSha,
-              subject: driver.subject,
-              webUrl: driver.webUrl,
-            })),
-          }
-        : {}),
-    };
-  }
-  if (unit.kind === 'ambiguous') {
-    return {
-      ...common,
-      kind: 'ambiguous',
-      reviewable: true,
-      ...(projectCommitSummary(unit.after) ? { after: projectCommitSummary(unit.after) } : {}),
-      ...(projectCommitSummary(unit.before) ? { before: projectCommitSummary(unit.before) } : {}),
-    };
-  }
-  if (unit.kind === 'absorbed-into-base') {
-    return {
-      ...common,
-      kind: 'absorbed-into-base',
-      reviewable: false,
-      ...(projectCommitSummary(unit.after) ? { after: projectCommitSummary(unit.after) } : {}),
-      ...(projectCommitSummary(unit.baseCommit) ? { baseCommit: projectCommitSummary(unit.baseCommit) } : {}),
-      ...(projectCommitSummary(unit.before) ? { before: projectCommitSummary(unit.before) } : {}),
-    };
-  }
-  // retained / rewritten-same-patch
-  return {
-    ...common,
-    kind: unit.kind === 'rewritten-same-patch' ? 'rewritten-same-patch' : 'retained',
-    reviewable: false,
-    ...(projectCommitSummary(unit.after) ? { after: projectCommitSummary(unit.after) } : {}),
-    ...(projectCommitSummary(unit.before) ? { before: projectCommitSummary(unit.before) } : {}),
-  };
-};
-
-export const projectCommitEvolution = (
-  evolution: MergeRequestVersionCommitEvolution,
-): ReviewCommitEvolution => ({
-  recommendation: {
-    rationale: evolution.recommendation.reason,
-    suggestedStructure: evolution.recommendation.structure,
-  },
-  summary: evolution.summary,
-  units: evolution.units.map(projectEvolutionUnit),
-  ...(evolution.warnings ? { warnings: evolution.warnings } : {}),
-});
+export { projectCommitEvolution, projectEvolutionUnit } from '@nkzw/codiff-core';
 
 export const projectVersionCompare = (
   compare: MergeRequestVersionCompare,

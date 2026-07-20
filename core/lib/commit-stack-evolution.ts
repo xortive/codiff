@@ -4,7 +4,12 @@
  * Used by GitLab MR versions and GitHub force-push head comparisons so both
  * forges share one pairing algorithm.
  */
-import type { ChangedFile } from '../types.ts';
+import type {
+  ChangedFile,
+  ReviewCommitEvolution,
+  ReviewCommitSummary,
+  ReviewEvolutionUnit,
+} from '../types.ts';
 import { sha256 } from './crypto.ts';
 
 export const versionCommitSignatureAlgorithmVersion = 'patch-signature-v1';
@@ -79,17 +84,17 @@ export type VersionCommitEvolutionUnit = {
 /** Minimal endpoint identity needed for evolution range bookkeeping. */
 export type DiffEndpointRef = {
   baseSha: string;
+  createdAt?: string;
   headSha: string;
   id?: string;
   label?: string;
   startSha?: string;
-  createdAt?: string;
 };
 
 export type CommitStackEvolutionRange = {
   from: DiffEndpointRef;
-  to: DiffEndpointRef;
   paths?: ReadonlyArray<string>;
+  to: DiffEndpointRef;
 };
 
 export type CommitStackEvolution = {
@@ -828,3 +833,144 @@ export const attributeRebaseDrivers = ({
     .slice(0, limit)
     .map(({ score: _score, ...commit }) => commit);
 };
+
+type ProjectableCommit = {
+  authoredAt: string;
+  authorName: string;
+  diffStat?: { additions: number; deletions: number; filesChanged: number };
+  parentIds?: ReadonlyArray<string>;
+  sha: string;
+  shortSha: string;
+  subject: string;
+  webUrl?: string;
+};
+
+const projectCommitSummary = (
+  commit: ProjectableCommit | undefined,
+): ReviewCommitSummary | undefined => {
+  if (!commit) {
+    return undefined;
+  }
+  return {
+    authoredAt: commit.authoredAt,
+    authorName: commit.authorName,
+    parentIds: commit.parentIds ?? [],
+    sha: commit.sha,
+    shortSha: commit.shortSha,
+    subject: commit.subject,
+    webUrl: commit.webUrl,
+    ...(commit.diffStat ? { diffStat: commit.diffStat } : {}),
+  };
+};
+
+/**
+ * Project forge-internal evolution units onto Core {@link ReviewEvolutionUnit}.
+ * Maps GitLab-ish kinds (`added` / `likely-revised`) onto host UI kinds
+ * (`introduced` / `revised`).
+ */
+export const projectEvolutionUnit = (unit: {
+  after?: ProjectableCommit;
+  baseCommit?: ProjectableCommit;
+  before?: ProjectableCommit;
+  confidence: 'exact' | 'high' | 'unmatched';
+  id: string;
+  kind: string;
+  matchReasons?: ReadonlyArray<string>;
+  matchScore?: number;
+  order: number;
+  rebaseDrivers?: ReadonlyArray<{
+    authoredAt: string;
+    authorName: string;
+    overlappingPaths: ReadonlyArray<string>;
+    sha: string;
+    shortSha: string;
+    subject: string;
+    webUrl?: string;
+  }>;
+  reviewable: boolean;
+}): ReviewEvolutionUnit => {
+  const common = {
+    confidence: unit.confidence,
+    id: unit.id,
+    order: unit.order,
+    ...(unit.matchReasons ? { matchReasons: unit.matchReasons } : {}),
+    ...(unit.matchScore != null ? { matchScore: unit.matchScore } : {}),
+  } as const;
+  if (unit.kind === 'added' || unit.kind === 'introduced') {
+    return {
+      ...common,
+      after: projectCommitSummary(unit.after)!,
+      kind: 'introduced',
+      reviewable: true,
+    };
+  }
+  if (unit.kind === 'removed') {
+    return {
+      ...common,
+      before: projectCommitSummary(unit.before)!,
+      kind: 'removed',
+      reviewable: true,
+    };
+  }
+  if (unit.kind === 'likely-revised' || unit.kind === 'revised') {
+    return {
+      ...common,
+      after: projectCommitSummary(unit.after)!,
+      before: projectCommitSummary(unit.before)!,
+      kind: 'revised',
+      reviewable: true,
+      ...(unit.rebaseDrivers
+        ? {
+            rebaseDrivers: unit.rebaseDrivers.map((driver) => ({
+              authoredAt: driver.authoredAt,
+              authorName: driver.authorName,
+              overlappingPaths: driver.overlappingPaths,
+              sha: driver.sha,
+              shortSha: driver.shortSha,
+              subject: driver.subject,
+              webUrl: driver.webUrl,
+            })),
+          }
+        : {}),
+    };
+  }
+  if (unit.kind === 'ambiguous') {
+    return {
+      ...common,
+      kind: 'ambiguous',
+      reviewable: true,
+      ...(projectCommitSummary(unit.after) ? { after: projectCommitSummary(unit.after) } : {}),
+      ...(projectCommitSummary(unit.before) ? { before: projectCommitSummary(unit.before) } : {}),
+    };
+  }
+  if (unit.kind === 'absorbed-into-base') {
+    return {
+      ...common,
+      kind: 'absorbed-into-base',
+      reviewable: false,
+      ...(projectCommitSummary(unit.after) ? { after: projectCommitSummary(unit.after) } : {}),
+      ...(projectCommitSummary(unit.baseCommit)
+        ? { baseCommit: projectCommitSummary(unit.baseCommit) }
+        : {}),
+      ...(projectCommitSummary(unit.before) ? { before: projectCommitSummary(unit.before) } : {}),
+    };
+  }
+  return {
+    ...common,
+    kind: unit.kind === 'rewritten-same-patch' ? 'rewritten-same-patch' : 'retained',
+    reviewable: false,
+    ...(projectCommitSummary(unit.after) ? { after: projectCommitSummary(unit.after) } : {}),
+    ...(projectCommitSummary(unit.before) ? { before: projectCommitSummary(unit.before) } : {}),
+  };
+};
+
+/** Project forge-internal stack evolution onto Core {@link ReviewCommitEvolution}. */
+export const projectCommitEvolution = (evolution: CommitStackEvolution): ReviewCommitEvolution => ({
+  recommendation: {
+    rationale: evolution.recommendation.reason,
+    suggestedStructure: evolution.recommendation.structure,
+  },
+  summary: evolution.summary,
+  units: evolution.units.map(projectEvolutionUnit),
+  ...(evolution.warnings ? { warnings: evolution.warnings } : {}),
+});
