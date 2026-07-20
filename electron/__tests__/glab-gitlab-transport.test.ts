@@ -1,15 +1,12 @@
-import { chmod, mkdtemp, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createRequire } from 'node:module';
 import { afterEach, expect, test } from 'vite-plus/test';
 
 const require = createRequire(import.meta.url);
 const { createGlabGitLabTransport } = require('../git-state/glab-gitlab-transport.cjs') as {
-  createGlabGitLabTransport: (options: {
-    hostname: string;
-    repoRoot: string;
-  }) => {
+  createGlabGitLabTransport: (options: { hostname: string; repoRoot: string }) => {
     request: <T>(request: {
       method?: string;
       path: string;
@@ -44,7 +41,7 @@ process.stdin.setEncoding('utf8');
 process.stdin.on('data', (chunk) => { input += chunk; });
 process.stdin.on('end', () => {
   fs.appendFileSync(callsPath, JSON.stringify({ args, input }) + '\\n');
-  if (args.includes('/api/v4/projects/group%2Fproject/merge_requests/7/versions')) {
+  if (args.includes('/projects/group%2Fproject/merge_requests/7/versions')) {
     process.stdout.write(JSON.stringify([
       {
         id: 1,
@@ -73,7 +70,13 @@ process.stdin.on('end', () => {
   const versions = await transport.request<Array<{ id: number }>>({
     path: '/api/v4/projects/group%2Fproject/merge_requests/7/versions',
   });
-  expect(versions).toEqual([
-    expect.objectContaining({ id: 1 }),
-  ]);
+  expect(versions).toEqual([expect.objectContaining({ id: 1 })]);
+  const calls = (await readFile(callsPath, 'utf8'))
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line) as { args: Array<string> });
+  expect(calls[0]?.args).toContain('/projects/group%2Fproject/merge_requests/7/versions');
+  expect(calls[0]?.args).not.toContain(
+    '/api/v4/projects/group%2Fproject/merge_requests/7/versions',
+  );
 });

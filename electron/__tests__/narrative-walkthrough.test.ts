@@ -873,7 +873,9 @@ test('requires chapter ids in authored walkthrough drafts', async () => {
   const input = baseInput();
   delete input.chapters[0].id;
 
-  await expect(normalizeNarrativeWalkthrough(input, files, { agent: 'opencode' })).rejects.toThrow(/id/i);
+  await expect(normalizeNarrativeWalkthrough(input, files, { agent: 'opencode' })).rejects.toThrow(
+    /id/i,
+  );
 });
 
 test('normalizes walkthroughs made only of synthetic hunks', async () => {
@@ -1177,7 +1179,9 @@ test('throws when no chapters have resolvable stops', async () => {
     })),
   }));
 
-  await expect(normalizeNarrativeWalkthrough(input, files)).rejects.toThrow(/did not reference any current diff hunks|no chapters/i);
+  await expect(normalizeNarrativeWalkthrough(input, files)).rejects.toThrow(
+    /did not reference any current diff hunks|no chapters/i,
+  );
 });
 
 test('throws an explicit error for legacy v3 anchor walkthroughs', async () => {
@@ -1217,7 +1221,9 @@ test('throws an explicit error for legacy v3 anchor walkthroughs', async () => {
     version: 3,
   };
 
-  await expect(normalizeNarrativeWalkthrough(input, files)).rejects.toThrow(/legacy v3 anchors\[\]/i);
+  await expect(normalizeNarrativeWalkthrough(input, files)).rejects.toThrow(
+    /legacy v3 anchors\[\]/i,
+  );
   await expect(normalizeNarrativeWalkthrough(input, files)).rejects.toThrow(/v4 hunkIds\[\]/i);
 });
 

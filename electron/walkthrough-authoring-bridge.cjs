@@ -31,7 +31,7 @@ const normalizeNarrativeWalkthrough = async (value, state, agent, hunkIdByAlias)
   if (hunkIdByAlias && hunkIdByAlias.size > 0 && value && typeof value === 'object') {
     const rewriteIds = (ids) =>
       Array.isArray(ids)
-        ? ids.map((id) => (typeof id === 'string' ? hunkIdByAlias.get(id) ?? id : id))
+        ? ids.map((id) => (typeof id === 'string' ? (hunkIdByAlias.get(id) ?? id) : id))
         : ids;
     const input = /** @type {any} */ (value);
     draft = {
@@ -48,7 +48,7 @@ const normalizeNarrativeWalkthrough = async (value, state, agent, hunkIdByAlias)
                         ...note,
                         hunkId:
                           typeof note?.hunkId === 'string'
-                            ? hunkIdByAlias.get(note.hunkId) ?? note.hunkId
+                            ? (hunkIdByAlias.get(note.hunkId) ?? note.hunkId)
                             : note?.hunkId,
                       }))
                     : stop?.notes,

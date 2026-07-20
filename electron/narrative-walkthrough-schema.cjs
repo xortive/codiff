@@ -208,6 +208,14 @@ const narrativeWalkthroughResponseSchema = strictResponseSchema(
   narrativeWalkthroughGenerationSchema,
 );
 
+const versionCommitOverviewResponseSchema = {
+  additionalProperties: false,
+  properties: {
+    focus: { type: 'string' },
+  },
+  required: ['focus'],
+  type: 'object',
+};
 module.exports = {
   AGENTS,
   CHANGE_TYPES,
@@ -217,5 +225,6 @@ module.exports = {
   MAX_WALKTHROUGH_STOPS,
   MAX_HUNKS_PER_WALKTHROUGH_GROUP,
   narrativeWalkthroughResponseSchema,
+  versionCommitOverviewResponseSchema,
   narrativeWalkthroughSchema,
 };

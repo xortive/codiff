@@ -1,6 +1,7 @@
 import type { CodiffConfig } from './config/types.ts';
 import type {
   AgentSkillStatus,
+  ChangedFile,
   CodiffFeatureFlags,
   CodiffLaunchOptions,
   CodiffMarkdownDocument,
@@ -9,7 +10,20 @@ import type {
   DiffImageContentResult,
   DiffSection,
   DiffSectionContentRequest,
+  GenerateLocalReviewWalkthroughRequest,
+  GenerateLocalReviewWalkthroughResult,
   GitIdentity,
+  GitLabReviewVersionCompareRequest,
+  GitLabReviewVersionCompareResult,
+  GitLabReviewVersionsRequest,
+  GitLabReviewVersionUnitDiffRequest,
+  ReviewVersionCompareRequest,
+  ReviewVersionCompareResult,
+  ReviewVersionsRequest,
+  ReviewVersionsResult,
+  ReviewVersionUnitDiffRequest,
+  StoredLocalReviewWalkthroughRequest,
+  StoredLocalReviewWalkthroughResult,
   NarrativeWalkthroughRequestOptions,
   NarrativeWalkthroughResult,
   PlanHandoffStatus,
@@ -19,6 +33,7 @@ import type {
   ReviewAssistantRequest,
   ReviewAssistantResult,
   ReviewSource,
+  ReviewVersionOption,
   SaveMarkdownDocumentRequest,
   SaveMarkdownDocumentResult,
   SharePlanResult,
@@ -46,12 +61,24 @@ declare global {
         request: WalkthroughCommitRequest,
       ) => Promise<WalkthroughCommitResult>;
       decreaseCodeFontSize: () => Promise<void>;
+      generateReviewWalkthrough: (
+        request: GenerateLocalReviewWalkthroughRequest,
+      ) => Promise<GenerateLocalReviewWalkthroughResult>;
       getAgentSkillStatus: () => Promise<AgentSkillStatus>;
       getConfig: () => Promise<CodiffConfig>;
       getDiffImageContent: (request: DiffImageContentRequest) => Promise<DiffImageContentResult>;
       getDiffSectionContent: (request: DiffSectionContentRequest) => Promise<DiffSection>;
       getFeatureFlags: () => Promise<CodiffFeatureFlags>;
       getGitIdentity: () => Promise<GitIdentity>;
+      getGitLabReviewVersionCompare: (
+        request: GitLabReviewVersionCompareRequest,
+      ) => Promise<GitLabReviewVersionCompareResult>;
+      getGitLabReviewVersions: (
+        request: GitLabReviewVersionsRequest,
+      ) => Promise<ReadonlyArray<ReviewVersionOption>>;
+      getGitLabReviewVersionUnitDiff: (
+        request: GitLabReviewVersionUnitDiffRequest,
+      ) => Promise<ReadonlyArray<ChangedFile>>;
       getLaunchOptions: () => Promise<CodiffLaunchOptions>;
       getMarkdownDocument: (request: {
         kind: CodiffMarkdownDocument['kind'];
@@ -65,6 +92,16 @@ declare global {
       getPreferences: () => Promise<CodiffPreferences>;
       getRepositoryHistory: (limit?: number, source?: ReviewSource) => Promise<RepositoryHistory>;
       getRepositoryState: (source?: ReviewSource) => Promise<RepositoryState>;
+      getReviewVersionCompare: (
+        request: ReviewVersionCompareRequest,
+      ) => Promise<ReviewVersionCompareResult>;
+      getReviewVersions: (request: ReviewVersionsRequest) => Promise<ReviewVersionsResult>;
+      getReviewVersionUnitDiff: (
+        request: ReviewVersionUnitDiffRequest,
+      ) => Promise<ReadonlyArray<ChangedFile>>;
+      getStoredReviewWalkthrough: (
+        request: StoredLocalReviewWalkthroughRequest,
+      ) => Promise<StoredLocalReviewWalkthroughResult>;
       getTerminalHelperStatus: () => Promise<TerminalHelperStatus>;
       increaseCodeFontSize: () => Promise<void>;
       installAgentSkill: () => Promise<AgentSkillStatus>;

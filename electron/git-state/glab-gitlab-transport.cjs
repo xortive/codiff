@@ -89,7 +89,8 @@ const createGlabApiArgs = (hostname, path, query, method, body) => {
       url.searchParams.set(key, String(value));
     }
   }
-  const resource = `${url.pathname}${url.search}`;
+  const apiPath = url.pathname.replace(/^\/api\/v4(?=\/|$)/, '');
+  const resource = `${apiPath || '/'}${url.search}`;
   /** @type {Array<string>} */
   const args = ['api', '--hostname', hostname, resource];
   if (method && method !== 'GET') {
@@ -126,7 +127,11 @@ const runGlabApi = (repoRoot, hostname, args, input) =>
     child.stdout.on('data', (chunk) => stdout.push(chunk));
     child.stderr.on('data', (chunk) => stderr.push(chunk));
     child.on('error', (error) => {
-      reject(/** @type {NodeJS.ErrnoException} */ (error).code === 'ENOENT' ? createGlabNotFoundError() : error);
+      reject(
+        /** @type {NodeJS.ErrnoException} */ (error).code === 'ENOENT'
+          ? createGlabNotFoundError()
+          : error,
+      );
     });
     child.on('close', (code) => {
       if (code === 0) {

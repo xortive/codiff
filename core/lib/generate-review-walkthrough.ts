@@ -110,6 +110,17 @@ const toPromptOptionsForUnit = (
   range: { fromLabel: string; toLabel: string },
   base: WalkthroughPromptOptions | undefined,
 ): WalkthroughPromptOptions => {
+  if (unit.kind === 'commit') {
+    return {
+      ...base,
+      commitContext: {
+        sha: unit.commit.sha,
+        subject: unit.commit.subject,
+      },
+      versionCommitContext: undefined,
+      versionCompareRange: undefined,
+    };
+  }
   const after = unitAfter(unit);
   const before = unitBefore(unit);
   return {
@@ -299,6 +310,25 @@ export async function generateReviewWalkthrough(
           state: unitState,
         });
         const walkthrough = normalizeWalkthroughDraft(draft, unitState, input.agent);
+        if (unit.kind === 'commit') {
+          progressUnits[index] = { ...progressUnits[index]!, status: 'ready' };
+          reportUnitProgress(`Finished ${unitLabel(unit)}.`);
+          return {
+            entry: {
+              context: {
+                commit: {
+                  sha: unit.commit.sha,
+                  shortSha: unit.commit.shortSha,
+                  subject: unit.commit.subject,
+                  ...(unit.commit.webUrl ? { webUrl: unit.commit.webUrl } : {}),
+                },
+                kind: 'mr-commit',
+              },
+              state: unitState,
+              walkthrough,
+            },
+          };
+        }
         const after = unitAfter(unit);
         const before = unitBefore(unit);
         const context: UnitWalkthroughEntry['context'] = {
@@ -380,7 +410,7 @@ export async function generateReviewWalkthrough(
 
   let focus: string | undefined;
   reportUnitProgress('Composing commit walkthroughs.', 'combining');
-  if (input.runOverviewModel) {
+  if (input.runOverviewModel && entries.some((entry) => entry.context.kind === 'version-commit')) {
     try {
       const overview = await input.runOverviewModel({
         agent: input.agent,

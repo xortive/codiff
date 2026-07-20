@@ -1220,3 +1220,87 @@ export type SubmitPullRequestReviewRequest = {
   event: PullRequestReviewEvent;
   source: Extract<ReviewSource, { type: 'pull-request' }>;
 };
+
+export type GitLabReviewVersionsRequest = {
+  source: Extract<ReviewSource, { type: 'pull-request' }>;
+};
+
+export type GitLabReviewVersionCompareRequest = {
+  from?: ReviewVersionCompareEndpoint;
+  fromId?: string;
+  source: Extract<ReviewSource, { type: 'pull-request' }>;
+  to?: ReviewVersionCompareEndpoint;
+  toId?: string;
+};
+
+export type ReviewVersionCompareEndpoint =
+  | { id: string; kind: 'version' }
+  | { kind: 'base' }
+  | { kind: 'head-sha'; sha: string }
+  | {
+      baseSha: string;
+      commentId: string;
+      headSha: string;
+      kind: 'comment-position';
+      startSha: string;
+    };
+
+export type GitLabReviewVersionCompareResult = {
+  versionCommitEvolution: ReviewCommitEvolution | null;
+  versionCommitEvolutionError: string | null;
+  versionCompare: DiffComparisonView;
+  warning?: string | null;
+};
+
+export type GitLabReviewVersionUnitDiffRequest = {
+  source: Extract<ReviewSource, { type: 'pull-request' }>;
+  unit: ReviewEvolutionUnit;
+};
+
+/** Provider-neutral aliases used by the local review host. */
+export type ReviewVersionsRequest = GitLabReviewVersionsRequest;
+export type ReviewVersionCompareRequest = GitLabReviewVersionCompareRequest;
+export type ReviewVersionCompareResult = GitLabReviewVersionCompareResult & {
+  warning?: string | null;
+};
+export type ReviewVersionUnitDiffRequest = GitLabReviewVersionUnitDiffRequest;
+export type ReviewVersionsResult = {
+  versions: ReadonlyArray<ReviewVersionOption>;
+  warning?: string | null;
+};
+
+export type GenerateLocalReviewWalkthroughRequest = {
+  force?: boolean;
+  source: Extract<ReviewSource, { type: 'pull-request' }>;
+  structure?: 'auto' | 'commit-by-commit' | 'whole-diff' | 'units';
+  unitId?: string;
+  versionCompare?: {
+    fromId: string;
+    toId: string;
+  };
+};
+
+export type StoredLocalReviewWalkthroughRequest = Omit<
+  GenerateLocalReviewWalkthroughRequest,
+  'force' | 'unitId'
+>;
+
+export type StoredLocalReviewWalkthroughResult =
+  | {
+      status: 'ready';
+      walkthrough: NarrativeWalkthrough;
+    }
+  | {
+      status: 'missing';
+    };
+
+export type GenerateLocalReviewWalkthroughResult =
+  | {
+      status: 'ready';
+      walkthrough: NarrativeWalkthrough;
+    }
+  | {
+      code?: string;
+      reason: string;
+      status: 'failed' | 'unavailable';
+    };

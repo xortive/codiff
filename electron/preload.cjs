@@ -24,6 +24,8 @@ const codiff = {
   getConfig: () => ipcRenderer.invoke('codiff:getConfig'),
   decreaseCodeFontSize: () => ipcRenderer.invoke('codiff:decreaseCodeFontSize'),
   getDiffSectionContent: (request) => ipcRenderer.invoke('codiff:getDiffSectionContent', request),
+  generateReviewWalkthrough: (request) =>
+    ipcRenderer.invoke('codiff:generateReviewWalkthrough', request),
   getFeatureFlags: () => ipcRenderer.invoke('codiff:getFeatureFlags'),
   getDiffImageContent: (request) => ipcRenderer.invoke('codiff:getDiffImageContent', request),
   getGitIdentity: () => ipcRenderer.invoke('codiff:getGitIdentity'),
@@ -34,6 +36,19 @@ const codiff = {
   getRepositoryHistory: (limit, source) =>
     ipcRenderer.invoke('codiff:getRepositoryHistory', limit, source),
   getRepositoryState: (source) => ipcRenderer.invoke('codiff:getRepositoryState', source),
+  getGitLabReviewVersionCompare: (request) =>
+    ipcRenderer.invoke('codiff:getGitLabReviewVersionCompare', request),
+  getGitLabReviewVersions: (request) =>
+    ipcRenderer.invoke('codiff:getGitLabReviewVersions', request),
+  getGitLabReviewVersionUnitDiff: (request) =>
+    ipcRenderer.invoke('codiff:getGitLabReviewVersionUnitDiff', request),
+  getReviewVersionCompare: (request) =>
+    ipcRenderer.invoke('codiff:getReviewVersionCompare', request),
+  getReviewVersions: (request) => ipcRenderer.invoke('codiff:getReviewVersions', request),
+  getReviewVersionUnitDiff: (request) =>
+    ipcRenderer.invoke('codiff:getReviewVersionUnitDiff', request),
+  getStoredReviewWalkthrough: (request) =>
+    ipcRenderer.invoke('codiff:getStoredReviewWalkthrough', request),
   getTerminalHelperStatus: () => ipcRenderer.invoke('codiff:getTerminalHelperStatus'),
   getNarrativeWalkthrough: (source, options) =>
     ipcRenderer.invoke('codiff:getNarrativeWalkthrough', source, options),
@@ -73,6 +88,7 @@ const codiff = {
     return () => ipcRenderer.removeListener('codiff:findInDiffs', listener);
   },
   onMarkdownDocumentChanged: (callback) => {
+    /** @param {Electron.IpcRendererEvent} _event @param {Parameters<typeof callback>[0]} change */
     const listener = (_event, change) => callback(change);
     ipcRenderer.on('codiff:markdownDocumentChanged', listener);
     return () => ipcRenderer.removeListener('codiff:markdownDocumentChanged', listener);

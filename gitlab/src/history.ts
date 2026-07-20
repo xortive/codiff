@@ -1,14 +1,3 @@
-/**
- * Read-side GitLab review-history adapter over {@link GitLabTransport}.
- */
-import type {
-  ChangedFile,
-  DiffComparisonAnalysis,
-  DiffComparisonView,
-  ReviewCommitEvolution,
-  ReviewPlan,
-  ReviewVersionOption,
-} from '@nkzw/codiff-core/types';
 import {
   commitRevisionLabel,
   diffComparison,
@@ -20,6 +9,17 @@ import {
   revisionRef,
   versionRevisionLabel,
 } from '@nkzw/codiff-core';
+/**
+ * Read-side GitLab review-history adapter over {@link GitLabTransport}.
+ */
+import type {
+  ChangedFile,
+  DiffComparisonAnalysis,
+  DiffComparisonView,
+  ReviewCommitEvolution,
+  ReviewPlan,
+  ReviewVersionOption,
+} from '@nkzw/codiff-core/types';
 import type { GitLabTransport } from './transport.ts';
 import {
   attributeRebaseDrivers,
@@ -126,7 +126,9 @@ const asString = (value: unknown, fallback = '') => (typeof value === 'string' ?
 const asNumber = (value: unknown) =>
   typeof value === 'number' && Number.isFinite(value) ? value : null;
 const trimmedString = (value: unknown) => {
-  if (typeof value !== 'string') return null;
+  if (typeof value !== 'string') {
+    return null;
+  }
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
 };
@@ -180,15 +182,9 @@ const repositoryCommitDiffEndpoint = (projectPath: string, sha: string) =>
 const repositoryCommitEndpoint = (projectPath: string, sha: string) =>
   `${gitLabOrigin}/api/v4/projects/${encodeURIComponent(projectPath)}/repository/commits/${encodeURIComponent(sha)}`;
 
-
-
-
-
-
-
 const createRequest = (
   pathOrUrl: string,
-  init: { method?: string; headers?: HeadersInit; body?: unknown } = {},
+  init: { body?: unknown; headers?: HeadersInit; method?: string } = {},
 ) => {
   // Accept absolute URLs from legacy helpers and reduce to path+query.
   let path = pathOrUrl;
@@ -209,14 +205,15 @@ const createRequest = (
 
 const readJson = async (
   transport: GitLabTransport,
-  request: { path: string; query?: Record<string, string>; method?: any; body?: unknown },
+  request: { body?: unknown; method?: any; path: string; query?: Record<string, string> },
   _unavailableMessage: string,
-) => transport.request({
-  body: request.body,
-  method: request.method,
-  path: request.path,
-  query: request.query,
-});
+) =>
+  transport.request({
+    body: request.body,
+    method: request.method,
+    path: request.path,
+    query: request.query,
+  });
 
 const readText = async (
   transport: GitLabTransport,
@@ -228,10 +225,7 @@ const readText = async (
   return transport.requestText({ path: request.path, query: request.query });
 };
 
-const readPages = async (
-  transport: GitLabTransport,
-  url: string,
-): Promise<Array<unknown>> => {
+const readPages = async (transport: GitLabTransport, url: string): Promise<Array<unknown>> => {
   const first = createRequest(url);
   if (transport.requestPages) {
     return transport.requestPages({ path: first.path, query: first.query });
@@ -245,7 +239,9 @@ const readPages = async (
     });
     const pageValues = asArray(result);
     values.push(...pageValues);
-    if (pageValues.length < 100) break;
+    if (pageValues.length < 100) {
+      break;
+    }
     page += 1;
   }
   if (page > maxPages) {
@@ -253,14 +249,6 @@ const readPages = async (
   }
   return values;
 };
-
-
-
-
-
-
-
-
 
 const createPatch = (diff: JsonRecord) => {
   const oldPath = asString(diff.old_path);
@@ -421,35 +409,32 @@ const normalizeMergeRequestVersion = (
 // Commits list → client commits mode. Commit diff → lazy onLoadCommitDiff.
 // Versions + version comparison → version picker + version-comparison view (algorithm in version-compare.ts).
 export const fetchGitLabMergeRequestCommits = async ({
-  transport,
   iid,
   projectPath: rawProjectPath,
+  transport,
 }: {
-  transport: GitLabTransport;
   iid: number;
   projectPath: string;
+  transport: GitLabTransport;
 }): Promise<Array<GitLabMergeRequestCommit>> => {
   const projectPath = validateProjectPath(rawProjectPath);
   if (!Number.isInteger(iid) || iid <= 0) {
     throw new Error('Invalid GitLab merge request IID.');
   }
-  const values = await readPages(
-    transport,
-    mergeRequestCommitsEndpoint(projectPath, iid),
-    );
+  const values = await readPages(transport, mergeRequestCommitsEndpoint(projectPath, iid));
   return values
     .map((value) => normalizeMergeRequestCommit(value, projectPath))
     .filter((commit): commit is GitLabMergeRequestCommit => commit != null);
 };
 
 export const fetchGitLabCommitDiff = async ({
-  transport,
   projectPath: rawProjectPath,
   sha,
+  transport,
 }: {
-  transport: GitLabTransport;
   projectPath: string;
   sha: string;
+  transport: GitLabTransport;
 }): Promise<Array<ChangedFile>> => {
   const projectPath = validateProjectPath(rawProjectPath);
   const normalizedSha = sha.trim();
@@ -459,7 +444,7 @@ export const fetchGitLabCommitDiff = async ({
   const diffs = await readPages(
     transport,
     repositoryCommitDiffEndpoint(projectPath, normalizedSha),
-    );
+  );
   return diffs
     .map((diff, index) =>
       normalizeDiff(diff, 0, normalizedSha, index, 'commit', normalizedSha.slice(0, 12)),
@@ -501,22 +486,19 @@ type VersionStatCache = {
 };
 
 const readGitLabMergeRequestVersions = async ({
-  transport,
   iid,
   projectPath: rawProjectPath,
+  transport,
 }: {
-  transport: GitLabTransport;
   iid: number;
   projectPath: string;
+  transport: GitLabTransport;
 }): Promise<Array<MergeRequestVersionRef>> => {
   const projectPath = validateProjectPath(rawProjectPath);
   if (!Number.isInteger(iid) || iid <= 0) {
     throw new Error('Invalid GitLab merge request IID.');
   }
-  const values = await readPages(
-    transport,
-    mergeRequestVersionsEndpoint(projectPath, iid),
-    );
+  const values = await readPages(transport, mergeRequestVersionsEndpoint(projectPath, iid));
   return values
     .map((value, index) => normalizeMergeRequestVersion(value, index))
     .filter((version): version is MergeRequestVersionRef => version != null)
@@ -528,9 +510,9 @@ const readGitLabMergeRequestVersions = async ({
 
 /** Versions ordered newest → oldest for existing versionCompare endpoint callers. */
 export const fetchGitLabMergeRequestVersions = async (args: {
-  transport: GitLabTransport;
   iid: number;
   projectPath: string;
+  transport: GitLabTransport;
 }): Promise<Array<MergeRequestVersionRef>> => {
   const versions = await readGitLabMergeRequestVersions(args);
   return versions.toReversed().map((version, index) => ({
@@ -541,19 +523,19 @@ export const fetchGitLabMergeRequestVersions = async (args: {
 
 export const fetchGitLabMergeRequestVersionHistory = async ({
   cache,
-  transport,
   iid,
   projectPath,
+  transport,
 }: {
   cache?: VersionStatCache;
-  transport: GitLabTransport;
   iid: number;
   projectPath: string;
+  transport: GitLabTransport;
 }): Promise<Array<MergeRequestVersionHistoryEntry>> => {
   const versions = await readGitLabMergeRequestVersions({
-    transport,
     iid,
     projectPath,
+    transport,
   });
   if (versions.length === 0) {
     return [];
@@ -578,9 +560,9 @@ export const fetchGitLabMergeRequestVersionHistory = async ({
       // SHAs so this is genuinely v(N-1) → vN (and base → v1).
       const files = await readCompareFiles({
         from: previous.headSha,
-        transport,
         projectPath,
         to: version.headSha,
+        transport,
       });
       const diffStat = {
         additions: files.reduce(
@@ -630,14 +612,14 @@ export const fetchGitLabMergeRequestVersionHistory = async ({
 };
 
 const readMergeRequestVersionFiles = async ({
-  transport,
   iid,
   projectPath,
+  transport,
   versionId,
 }: {
-  transport: GitLabTransport;
   iid: number;
   projectPath: string;
+  transport: GitLabTransport;
   versionId: string;
 }): Promise<Array<VersionPatchFile>> => {
   const value = await readJson(
@@ -652,14 +634,14 @@ const readMergeRequestVersionFiles = async ({
 };
 const readRepositoryCompare = async ({
   from,
-  transport,
   projectPath,
   to,
+  transport,
 }: {
   from: string;
-  transport: GitLabTransport;
   projectPath: string;
   to: string;
+  transport: GitLabTransport;
 }): Promise<JsonRecord> =>
   asRecord(
     await readJson(
@@ -671,9 +653,9 @@ const readRepositoryCompare = async ({
 
 const readCompareFiles = async (args: {
   from: string;
-  transport: GitLabTransport;
   projectPath: string;
   to: string;
+  transport: GitLabTransport;
 }): Promise<Array<VersionPatchFile>> => {
   const value = await readRepositoryCompare(args);
   return asArray(value.diffs)
@@ -729,14 +711,14 @@ const toBaseMovementCommit = (commit: GitLabMergeRequestCommit) => ({
 
 const readBaseMovement = async ({
   fromSha,
-  transport,
   projectPath,
   toSha,
+  transport,
 }: {
   fromSha: string;
-  transport: GitLabTransport;
   projectPath: string;
   toSha: string;
+  transport: GitLabTransport;
 }): Promise<VersionBaseMovement> => {
   const baseRef = (sha: string, value?: unknown) => {
     const commit = asRecord(value);
@@ -774,7 +756,7 @@ const readBaseMovement = async ({
         createRequest(repositoryCommitEndpoint(projectPath, toSha)),
         'Unable to load the new base commit.',
       ),
-      readRepositoryCompare({ from: fromSha, transport, projectPath, to: toSha }),
+      readRepositoryCompare({ from: fromSha, projectPath, to: toSha, transport }),
     ]);
     const from = baseRef(fromSha, fromValue);
     const to = baseRef(toSha, toValue);
@@ -798,9 +780,9 @@ const readBaseMovement = async ({
       try {
         const reverse = await readRepositoryCompare({
           from: toSha,
-          transport,
           projectPath,
           to: fromSha,
+          transport,
         });
         const reverseCommits = asArray(reverse.commits)
           .map((value) => normalizeMergeRequestCommit(value, projectPath))
@@ -977,18 +959,17 @@ const collectCommentAnchorsFromDiscussions = (
 export const fetchGitLabMergeRequestVersionCompare = async ({
   comments = [],
   from: fromEndpoint,
-  transport,
   iid,
   lastReviewed = null,
   paths,
   projectPath: rawProjectPath,
   readCached,
   to: toEndpoint,
+  transport,
   writeCached,
 }: {
   comments?: ReadonlyArray<CommentAnchor>;
   from: VersionCompareEndpoint;
-  transport: GitLabTransport;
   iid: number;
   lastReviewed?: MergeRequestVersionRef | null;
   paths?: ReadonlyArray<string>;
@@ -998,6 +979,7 @@ export const fetchGitLabMergeRequestVersionCompare = async ({
     to: MergeRequestVersionRef;
   }) => Promise<MergeRequestVersionCompare | null> | MergeRequestVersionCompare | null;
   to: VersionCompareEndpoint;
+  transport: GitLabTransport;
   writeCached?: (versionCompare: MergeRequestVersionCompare) => Promise<void> | void;
 }): Promise<MergeRequestVersionCompare> => {
   const projectPath = validateProjectPath(rawProjectPath);
@@ -1010,15 +992,14 @@ export const fetchGitLabMergeRequestVersionCompare = async ({
     toEndpoint.kind === 'comment-position';
   const [versions, discussionAnchors] = await Promise.all([
     fetchGitLabMergeRequestVersions({
-      transport,
       iid,
       projectPath,
+      transport,
     }),
     needsCommentAnchors
-      ? readPages(
-          transport,
-          mergeRequestEndpoint(projectPath, iid, '/discussions'),
-          ).then(collectCommentAnchorsFromDiscussions)
+      ? readPages(transport, mergeRequestEndpoint(projectPath, iid, '/discussions')).then(
+          collectCommentAnchorsFromDiscussions,
+        )
       : Promise.resolve([] as Array<CommentAnchor>),
   ]);
   if (versions.length === 0) {
@@ -1049,9 +1030,9 @@ export const fetchGitLabMergeRequestVersionCompare = async ({
 
   const baseMovementPromise = readBaseMovement({
     fromSha: from.baseSha,
-    transport,
     projectPath,
     toSha: to.baseSha,
+    transport,
   });
 
   const loadVersionFiles = async (version: MergeRequestVersionRef) => {
@@ -1059,9 +1040,9 @@ export const fetchGitLabMergeRequestVersionCompare = async ({
     if (listed) {
       try {
         return await readMergeRequestVersionFiles({
-          transport,
           iid,
           projectPath,
+          transport,
           versionId: version.id,
         });
       } catch {
@@ -1070,9 +1051,9 @@ export const fetchGitLabMergeRequestVersionCompare = async ({
     }
     return readCompareFiles({
       from: version.baseSha,
-      transport,
       projectPath,
       to: version.headSha,
+      transport,
     });
   };
 
@@ -1122,24 +1103,24 @@ export const fetchGitLabMergeRequestVersionCompare = async ({
 
 const resolveVersionCommitRange = async ({
   from,
-  transport,
   iid,
   projectPath,
   to,
+  transport,
 }: {
   from: VersionCompareEndpoint;
-  transport: GitLabTransport;
   iid: number;
   projectPath: string;
   to: VersionCompareEndpoint;
+  transport: GitLabTransport;
 }) => {
   const versions =
     from.kind === 'diff-identity' && to.kind === 'diff-identity'
       ? []
       : await fetchGitLabMergeRequestVersions({
-          transport,
           iid,
           projectPath,
+          transport,
         });
   if (versions.length === 0 && (from.kind !== 'diff-identity' || to.kind !== 'diff-identity')) {
     throw new Error('GitLab did not return merge request versions.');
@@ -1152,14 +1133,14 @@ const resolveVersionCommitRange = async ({
 
 export const fetchGitLabHistoricalCommitStack = async ({
   baseSha,
-  transport,
   headSha,
   projectPath: rawProjectPath,
+  transport,
 }: {
   baseSha: string;
-  transport: GitLabTransport;
   headSha: string;
   projectPath: string;
+  transport: GitLabTransport;
 }): Promise<Array<GitLabMergeRequestCommit>> => {
   if (baseSha === headSha) {
     return [];
@@ -1167,9 +1148,9 @@ export const fetchGitLabHistoricalCommitStack = async ({
   const projectPath = validateProjectPath(rawProjectPath);
   const compare = await readRepositoryCompare({
     from: baseSha,
-    transport,
     projectPath,
     to: headSha,
+    transport,
   });
   if (compare.compare_timeout === true || compare.overflow === true) {
     throw new Error('GitLab truncated the historical commit stack.');
@@ -1183,18 +1164,15 @@ export const fetchGitLabHistoricalCommitStack = async ({
 };
 
 const readCommitPatchFiles = async ({
-  transport,
   projectPath,
   sha,
+  transport,
 }: {
-  transport: GitLabTransport;
   projectPath: string;
   sha: string;
+  transport: GitLabTransport;
 }) => {
-  const values = await readPages(
-    transport,
-    repositoryCommitDiffEndpoint(projectPath, sha),
-    );
+  const values = await readPages(transport, repositoryCommitDiffEndpoint(projectPath, sha));
   return values
     .map(normalizeVersionPatchFile)
     .filter((file): file is VersionPatchFile => file != null);
@@ -1221,47 +1199,47 @@ type VersionCommitSignatureCache = {
 export const fetchGitLabMergeRequestVersionCommitEvolution = async ({
   cache,
   from: fromEndpoint,
-  transport,
   iid,
   projectPath: rawProjectPath,
   to: toEndpoint,
+  transport,
 }: {
   cache?: VersionCommitSignatureCache;
   from: VersionCompareEndpoint;
-  transport: GitLabTransport;
   iid: number;
   projectPath: string;
   to: VersionCompareEndpoint;
+  transport: GitLabTransport;
 }): Promise<MergeRequestVersionCommitEvolution> => {
   const projectPath = validateProjectPath(rawProjectPath);
   const range = await resolveVersionCommitRange({
     from: fromEndpoint,
-    transport,
     iid,
     projectPath,
     to: toEndpoint,
+    transport,
   });
   const warnings: Array<string> = [];
   const [oldStackResult, newStackResult, baseStackResult] = await Promise.allSettled([
     fetchGitLabHistoricalCommitStack({
       baseSha: range.from.baseSha,
-      transport,
       headSha: range.from.headSha,
       projectPath,
+      transport,
     }),
     fetchGitLabHistoricalCommitStack({
       baseSha: range.to.baseSha,
-      transport,
       headSha: range.to.headSha,
       projectPath,
+      transport,
     }),
     range.from.baseSha === range.to.baseSha
       ? Promise.resolve([])
       : fetchGitLabHistoricalCommitStack({
           baseSha: range.from.baseSha,
-          transport,
           headSha: range.to.baseSha,
           projectPath,
+          transport,
         }),
   ]);
   const stackCompleteness = {
@@ -1345,9 +1323,9 @@ export const fetchGitLabMergeRequestVersionCommitEvolution = async ({
         }
         try {
           const files = await fetchGitLabCommitDiff({
-            transport,
             projectPath,
             sha: commit.sha,
+            transport,
           });
           const signature = await createCommitPatchSignature(commit, files);
           signatures.set(commit.sha, signature);
@@ -1394,8 +1372,8 @@ export const fetchGitLabMergeRequestVersionCommitEvolution = async ({
 
 export const attributeVersionCommitRebaseDrivers = async ({
   baseCommits,
-  transport,
   projectPath,
+  transport,
   unit,
   unitFiles,
 }: {
@@ -1407,8 +1385,8 @@ export const attributeVersionCommitRebaseDrivers = async ({
     subject: string;
     webUrl: string;
   }>;
-  transport: GitLabTransport;
   projectPath: string;
+  transport: GitLabTransport;
   unit: VersionCommitEvolutionUnit;
   unitFiles: ReadonlyArray<ChangedFile>;
 }): Promise<ReadonlyArray<VersionRebaseDriverCommit>> => {
@@ -1431,9 +1409,9 @@ export const attributeVersionCommitRebaseDrivers = async ({
       batch.map(async (commit) => {
         try {
           const files = await fetchGitLabCommitDiff({
-            transport,
             projectPath,
             sha: commit.sha,
+            transport,
           });
           signatures.set(
             commit.sha,
@@ -1453,12 +1431,12 @@ export const attributeVersionCommitRebaseDrivers = async ({
 };
 
 export const fetchGitLabVersionCommitUnitDiff = async ({
-  transport,
   projectPath: rawProjectPath,
+  transport,
   unit,
 }: {
-  transport: GitLabTransport;
   projectPath: string;
+  transport: GitLabTransport;
   unit: VersionCommitEvolutionUnit;
 }): Promise<Array<ChangedFile>> => {
   const projectPath = validateProjectPath(rawProjectPath);
@@ -1467,7 +1445,7 @@ export const fetchGitLabVersionCommitUnitDiff = async ({
   }
   if (unit.kind === 'added' && unit.after) {
     return scopeVersionCommitFiles(
-      await fetchGitLabCommitDiff({ transport, projectPath, sha: unit.after.sha }),
+      await fetchGitLabCommitDiff({ projectPath, sha: unit.after.sha, transport }),
       unit.id,
     );
   }
@@ -1478,9 +1456,9 @@ export const fetchGitLabVersionCommitUnitDiff = async ({
     }
     const compare = await readRepositoryCompare({
       from: unit.before.sha,
-      transport,
       projectPath,
       to: parent,
+      transport,
     });
     return scopeVersionCommitFiles(
       asArray(compare.diffs)
@@ -1496,8 +1474,8 @@ export const fetchGitLabVersionCommitUnitDiff = async ({
       throw new Error('A revised commit parent is unavailable.');
     }
     const [fromFiles, toFiles] = await Promise.all([
-      readCommitPatchFiles({ transport, projectPath, sha: unit.before.sha }),
-      readCommitPatchFiles({ transport, projectPath, sha: unit.after.sha }),
+      readCommitPatchFiles({ projectPath, sha: unit.before.sha, transport }),
+      readCommitPatchFiles({ projectPath, sha: unit.after.sha, transport }),
     ]);
     const blobs = new Map<string, string | null>();
     const readBlob = async (filePath: string, ref: string) => {
@@ -1549,17 +1527,21 @@ export const fetchGitLabVersionCommitUnitDiff = async ({
 };
 
 export const projectMergeRequestVersionRef = (
-  version: MergeRequestVersionRef & { number?: number; createdAt?: string; diffStat?: ReviewVersionOption['diffStat']; isHead?: boolean; previousCreatedAt?: string; previousNumber?: number },
+  version: MergeRequestVersionRef & {
+    createdAt?: string;
+    diffStat?: ReviewVersionOption['diffStat'];
+    isHead?: boolean;
+    number?: number;
+    previousCreatedAt?: string;
+    previousNumber?: number;
+  },
 ): ReviewVersionOption =>
   reviewVersionOption({
     createdAt: version.createdAt,
     id: version.id,
     range: diffRange(
       revisionRef(version.baseSha, commitRevisionLabel(version.baseSha.slice(0, 7))),
-      revisionRef(
-        version.headSha,
-        versionRevisionLabel(version.label, undefined),
-      ),
+      revisionRef(version.headSha, versionRevisionLabel(version.label, undefined)),
     ),
     ...(version.diffStat ? { diffStat: version.diffStat } : {}),
     ...(version.isHead != null ? { isHead: version.isHead } : {}),
@@ -1579,9 +1561,7 @@ export const projectVersionCompare = (
   const analysis: DiffComparisonAnalysis = {
     summary: compare.summary,
     ...(compare.baseMovement ? { baseMovement: compare.baseMovement } : {}),
-    ...(compare.commentAssociations
-      ? { commentAssociations: compare.commentAssociations }
-      : {}),
+    ...(compare.commentAssociations ? { commentAssociations: compare.commentAssociations } : {}),
     ...(compare.warnings ? { warnings: compare.warnings } : {}),
   };
   return diffComparisonView({
@@ -1603,7 +1583,9 @@ export const projectReviewPlan = ({
   versionCompare?: MergeRequestVersionCompare | DiffComparisonView | null;
 }): ReviewPlan => {
   const projectedEvolution =
-    evolution && 'recommendation' in evolution && 'reason' in (evolution as MergeRequestVersionCommitEvolution).recommendation
+    evolution &&
+    'recommendation' in evolution &&
+    'reason' in (evolution as MergeRequestVersionCommitEvolution).recommendation
       ? projectCommitEvolution(evolution as MergeRequestVersionCommitEvolution)
       : (evolution as ReviewCommitEvolution | undefined);
   const view =

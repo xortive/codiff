@@ -4,10 +4,12 @@ import {
   fetchGitLabMergeRequestVersions,
   projectCommitEvolution,
   projectReviewPlan,
-  projectVersionCompare,
   toGitLabDiffIdentity,
 } from '../src/index.ts';
-import { matchVersionCommitStacks, createCommitPatchSignature } from '../src/version-commit-evolution.ts';
+import {
+  matchVersionCommitStacks,
+  createCommitPatchSignature,
+} from '../src/version-commit-evolution.ts';
 
 test('loads merge request versions through the injected transport', async () => {
   const transport = createFakeGitLabTransport([
@@ -15,18 +17,18 @@ test('loads merge request versions through the injected transport', async () => 
       path: '/api/v4/projects/group%2Fproject/merge_requests/7/versions',
       response: [
         {
-          id: 2,
-          head_commit_sha: 'b'.repeat(40),
           base_commit_sha: 'a'.repeat(40),
-          start_commit_sha: 'a'.repeat(40),
           created_at: '2026-01-02T00:00:00.000Z',
+          head_commit_sha: 'b'.repeat(40),
+          id: 2,
+          start_commit_sha: 'a'.repeat(40),
         },
         {
-          id: 1,
-          head_commit_sha: 'c'.repeat(40),
           base_commit_sha: 'a'.repeat(40),
-          start_commit_sha: 'a'.repeat(40),
           created_at: '2026-01-01T00:00:00.000Z',
+          head_commit_sha: 'c'.repeat(40),
+          id: 1,
+          start_commit_sha: 'a'.repeat(40),
         },
       ],
     },
@@ -105,9 +107,12 @@ test('projects algorithm evolution into Core review plans', async () => {
     to,
   });
   const projected = projectCommitEvolution(evolution);
-  expect(projected.units.some((unit) => unit.kind === 'revised' || unit.kind === 'rewritten-same-patch' || unit.kind === 'retained')).toBe(
-    true,
-  );
+  expect(
+    projected.units.some(
+      (unit) =>
+        unit.kind === 'revised' || unit.kind === 'rewritten-same-patch' || unit.kind === 'retained',
+    ),
+  ).toBe(true);
   const plan = projectReviewPlan({ evolution, structure: 'auto' });
   expect(plan.structure === 'whole-diff' || plan.structure === 'units').toBe(true);
 });

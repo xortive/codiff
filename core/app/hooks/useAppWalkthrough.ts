@@ -93,6 +93,9 @@ export function useAppWalkthrough({
   useEffect(
     () =>
       window.codiff.onWalkthroughProgress((progress) => {
+        if (!progress.phase) {
+          return;
+        }
         setWalkthroughProgress((current) =>
           current.phase === progress.phase
             ? current

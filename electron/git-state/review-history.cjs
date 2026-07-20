@@ -59,7 +59,12 @@ const listReviewVersions = async (repoRoot, source) => {
 /**
  * @param {string} repoRoot
  * @param {PullRequestSource} source
- * @param {{ fromId: string, toId: string }} range
+ * @param {{
+ *   from?: import('../../core/types.ts').ReviewVersionCompareEndpoint,
+ *   fromId?: string,
+ *   to?: import('../../core/types.ts').ReviewVersionCompareEndpoint,
+ *   toId?: string,
+ * }} range
  * @param {ReadonlyArray<ReviewVersionOption>} [versions]
  */
 const compareReviewVersions = async (repoRoot, source, range, versions) => {
@@ -70,7 +75,22 @@ const compareReviewVersions = async (repoRoot, source, range, versions) => {
   if (isGitHubSource(source)) {
     const resolvedVersions =
       versions ?? (await listGitHubReviewVersions(repoRoot, source)).versions;
-    return compareGitHubReviewVersions(repoRoot, source, range, resolvedVersions);
+    const endpointId = (
+      /** @type {import('../../core/types.ts').ReviewVersionCompareEndpoint | undefined} */ endpoint,
+      /** @type {string | undefined} */ fallbackId,
+    ) => {
+      if (!endpoint) return fallbackId;
+      if (endpoint.kind === 'version') return endpoint.id;
+      if (endpoint.kind === 'head-sha') return endpoint.sha;
+      if (endpoint.kind === 'comment-position') return endpoint.headSha;
+      return resolvedVersions[0]?.id;
+    };
+    const fromId = endpointId(range.from, range.fromId);
+    const toId = endpointId(range.to, range.toId);
+    if (!fromId || !toId) {
+      throw new Error('GitHub review comparison endpoints could not be resolved.');
+    }
+    return compareGitHubReviewVersions(repoRoot, source, { fromId, toId }, resolvedVersions);
   }
   throw new Error('Review version compare is not available for this pull request provider.');
 };

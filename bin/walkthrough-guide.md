@@ -67,6 +67,8 @@ choose.
   actually support.
 - If a PR/MR description is available, use it only as author intent and orientation. Do not copy it
   into the walkthrough JSON; the diff and hunk ids remain the source of truth.
+- For a Codiff-provided commit or version unit digest, author only that unit. Codiff composes
+  successful unit walkthroughs in commit order and retains each unit's scoped files.
 
 ## hunkId format
 

@@ -8,12 +8,14 @@ import {
   buildCommitModel,
   buildGenericCommitModel,
   buildWalkthroughView,
+  combineWalkthroughCommitFiles,
   focusChangedFileForHunks,
   formatWalkthroughFileLineRows,
   formatWalkthroughFileList,
   getCommitSelectionPaths,
   getUncoveredWalkthroughFileLineItems,
   getUncoveredWalkthroughFiles,
+  getWalkthroughCommitDiffShas,
   getWalkthroughRunNote,
   isWalkthroughCommittable,
   resolveWalkthroughHunkFile,
@@ -662,6 +664,52 @@ test('resolveWalkthroughHunkFile requires exact anchor section', () => {
     ),
   ).toBeNull();
   expect(resolveWalkthroughHunkFile(testHunk, files)).toBeNull();
+});
+
+test('commit walkthrough files preserve commit order and duplicate paths', () => {
+  const firstFile: ChangedFile = {
+    fingerprint: 'first',
+    path: 'src/shared.ts',
+    sections: [{ binary: false, id: 'first:section', kind: 'commit', patch: '+first' }],
+    status: 'modified',
+  };
+  const secondFile: ChangedFile = {
+    fingerprint: 'second',
+    path: 'src/shared.ts',
+    sections: [{ binary: false, id: 'second:section', kind: 'commit', patch: '+second' }],
+    status: 'modified',
+  };
+  const commitWalkthrough: NarrativeWalkthrough = {
+    ...walkthrough(),
+    chapters: [
+      {
+        ...walkthrough().chapters[0],
+        commit: { gitSha: 'git-first', sha: 'first', shortSha: 'first', subject: 'First' },
+      },
+      {
+        ...walkthrough().chapters[1],
+        commit: { gitSha: 'git-second', sha: 'second', shortSha: 'second', subject: 'Second' },
+      },
+    ],
+  };
+
+  expect(getWalkthroughCommitDiffShas(commitWalkthrough)).toEqual(['git-first', 'git-second']);
+  expect(
+    combineWalkthroughCommitFiles(['git-first', 'git-second'], {
+      'git-first': [firstFile],
+      'git-second': [secondFile],
+    }),
+  ).toEqual([firstFile, secondFile]);
+  expect(
+    resolveWalkthroughHunkFile(
+      {
+        ...appHunk,
+        anchor: { ...appHunk.anchor, sectionId: 'second:section' },
+        path: 'src/shared.ts',
+      },
+      [firstFile, secondFile],
+    )?.file,
+  ).toBe(secondFile);
 });
 
 const multiHunkFile = (): ChangedFile => ({

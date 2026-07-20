@@ -740,7 +740,10 @@ const readMergeRequestImageContent = async (launchPath, source, requestedPath) =
   }
 };
 
-const { createGlabGitLabTransport, getGlabCommand: getGlabCommandFromTransport } = require('./glab-gitlab-transport.cjs');
+const {
+  createGlabGitLabTransport,
+  getGlabCommand: getGlabCommandFromTransport,
+} = require('./glab-gitlab-transport.cjs');
 
 module.exports = {
   createGlabGitLabTransport,

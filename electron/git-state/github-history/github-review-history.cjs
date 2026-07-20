@@ -186,12 +186,23 @@ const isAncestor = async (repoRoot, ancestor, descendant) => {
  * @param {string} repoRoot
  */
 const createLocalGit = (repoRoot) => ({
-  ensureCommit: (sha) => ensureCommitAvailable(repoRoot, sha),
+  ensureCommit: (/** @type {string} */ sha) => ensureCommitAvailable(repoRoot, sha),
   /**
    * @param {string} ancestor
    * @param {string} descendant
    */
   isAncestor: (ancestor, descendant) => isAncestor(repoRoot, ancestor, descendant),
+  /**
+   * @param {string} left
+   * @param {string} right
+   */
+  mergeBase: async (left, right) => {
+    const base = (await gitOrEmpty(repoRoot, ['merge-base', left, right])).trim();
+    if (!base) {
+      throw new Error(`No merge base is available for ${shortSha(left)} and ${shortSha(right)}.`);
+    }
+    return base;
+  },
   /**
    * @param {string} sha
    */
@@ -233,8 +244,8 @@ const createLocalGit = (repoRoot) => ({
 const listGitHubReviewVersions = async (repoRoot, source) => {
   const pull = assertGitHubSource(source);
   const transport = createGhGitHubTransport({ repoRoot });
-  const github = await loadGitHubHistory();
-  return github.listGitHubReviewVersions({ pull, transport });
+  const github = /** @type {any} */ (await loadGitHubHistory());
+  return github.listGitHubReviewVersions({ git: createLocalGit(repoRoot), pull, transport });
 };
 
 /**

@@ -28,5 +28,6 @@
   "typescript.updateImportsOnFileMove.enabled": "always",
   "typescript.preferences.autoImportFileExcludePatterns": ["**/node_modules/vitest"],
   "typescript.tsdk": "node_modules/typescript/lib",
-  "typescript.experimental.useTsgo": true
+  "typescript.experimental.useTsgo": true,
+  "git.enabled": false
 }

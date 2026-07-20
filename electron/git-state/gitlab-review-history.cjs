@@ -58,7 +58,7 @@ const createTransportForSource = (repoRoot, source) => {
  *   number?: number,
  *   previousCreatedAt?: string,
  *   previousNumber?: number,
- * }} [extra]
+ * } | undefined} extra
  * @param {typeof import('../../gitlab/dist/index.mjs')} gitlab
  */
 const toReviewVersionOption = (version, extra, gitlab) =>
@@ -82,7 +82,7 @@ const toReviewVersionOption = (version, extra, gitlab) =>
 const listGitLabReviewVersions = async (repoRoot, source) => {
   const { iid, projectPath } = assertGitLabSource(source);
   const transport = createTransportForSource(repoRoot, source);
-  const gitlab = await loadGitLabHistory();
+  const gitlab = /** @type {any} */ (await loadGitLabHistory());
   const versions = await gitlab.fetchGitLabMergeRequestVersions({
     iid,
     projectPath,
@@ -151,9 +151,42 @@ const toCompareEndpoint = (versionId, versions) => {
 };
 
 /**
+ * @param {import('../../core/types.ts').ReviewVersionCompareEndpoint | undefined} endpoint
+ * @param {string | undefined} fallbackId
+ * @param {ReadonlyArray<import('../../gitlab/src/version-compare.ts').MergeRequestVersionRef>} versions
+ */
+const toRequestedCompareEndpoint = (
+  /** @type {import('../../core/types.ts').ReviewVersionCompareEndpoint | undefined} */ endpoint,
+  /** @type {string | undefined} */ fallbackId,
+  versions,
+) => {
+  if (!endpoint) {
+    if (!fallbackId) {
+      throw new Error('A review comparison endpoint is required.');
+    }
+    return toCompareEndpoint(fallbackId, versions);
+  }
+  if (endpoint.kind === 'base') {
+    return { kind: 'mr-base' };
+  }
+  if (endpoint.kind === 'version') {
+    return toCompareEndpoint(endpoint.id, versions);
+  }
+  if (endpoint.kind === 'head-sha') {
+    return { headSha: endpoint.sha, kind: 'head-sha' };
+  }
+  return { commentId: endpoint.commentId.replace(/^gitlab:/, ''), kind: 'comment-position' };
+};
+
+/**
  * @param {string} repoRoot
  * @param {PullRequestSource} source
- * @param {{ fromId: string, toId: string }} range
+ * @param {{
+ *   from?: import('../../core/types.ts').ReviewVersionCompareEndpoint,
+ *   fromId?: string,
+ *   to?: import('../../core/types.ts').ReviewVersionCompareEndpoint,
+ *   toId?: string,
+ * }} range
  * @returns {Promise<{
  *   versionCompare: DiffComparisonView,
  *   versionCommitEvolution: ReviewCommitEvolution | null,
@@ -163,7 +196,7 @@ const toCompareEndpoint = (versionId, versions) => {
 const compareGitLabReviewVersions = async (repoRoot, source, range) => {
   const { iid, projectPath } = assertGitLabSource(source);
   const transport = createTransportForSource(repoRoot, source);
-  const gitlab = await loadGitLabHistory();
+  const gitlab = /** @type {any} */ (await loadGitLabHistory());
   const versions = await gitlab.fetchGitLabMergeRequestVersions({
     iid,
     projectPath,
@@ -173,8 +206,8 @@ const compareGitLabReviewVersions = async (repoRoot, source, range) => {
     throw new Error('GitLab did not return merge request versions.');
   }
 
-  const fromEndpoint = toCompareEndpoint(range.fromId, versions);
-  const toEndpoint = toCompareEndpoint(range.toId, versions);
+  const fromEndpoint = toRequestedCompareEndpoint(range.from, range.fromId, versions);
+  const toEndpoint = toRequestedCompareEndpoint(range.to, range.toId, versions);
 
   const [compareResult, evolutionResult] = await Promise.allSettled([
     gitlab.fetchGitLabMergeRequestVersionCompare({
