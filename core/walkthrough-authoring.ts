@@ -27,3 +27,11 @@ export {
   type WalkthroughPromptOptions,
   type WalkthroughReviewStrategy,
 } from './lib/walkthrough-authoring.ts';
+
+export {
+  generateReviewWalkthrough,
+  type GenerateReviewWalkthroughInput,
+  type GenerateReviewWalkthroughResult,
+  type ReviewWalkthroughModelResult,
+  type ReviewWalkthroughRunModel,
+} from './lib/generate-review-walkthrough.ts';

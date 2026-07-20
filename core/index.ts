@@ -39,6 +39,13 @@ export {
   type VersionRebaseDriverCommit,
 } from './lib/commit-stack-evolution.ts';
 export {
+  generateReviewWalkthrough,
+  type GenerateReviewWalkthroughInput,
+  type GenerateReviewWalkthroughResult,
+  type ReviewWalkthroughModelResult,
+  type ReviewWalkthroughRunModel,
+} from './lib/generate-review-walkthrough.ts';
+export {
   parsePlanShareManifest,
   parsePlanShareUpload,
   type PlanShareManifestV1,
