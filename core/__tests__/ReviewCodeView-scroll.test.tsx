@@ -786,7 +786,7 @@ test('read-only review comments render safe details blocks', async () => {
   } satisfies ReviewComment;
 
   const view = await renderReact(
-    <ReviewCodeViewHarness comments={[comment]} files={[file]} supportsReviewCommentActions />,
+    <ReviewCodeViewHarness comments={[comment]} files={[file]} isPullRequest />,
   );
 
   try {
@@ -1362,9 +1362,9 @@ test('failed pull request comments keep their draft and can be retried', async (
     <ReviewCodeViewHarness
       comments={[comment]}
       files={[file]}
+      isPullRequest
       onSubmitComment={onSubmitComment}
       onUpdateComment={onUpdateComment}
-      supportsReviewCommentActions
     />,
   );
 
@@ -1410,8 +1410,8 @@ test('working-tree share comments support the Comment button and Mod+Enter', asy
     <ReviewCodeViewHarness
       comments={[comment]}
       files={[file]}
+      isPullRequest
       onSubmitComment={onSubmitComment}
-      supportsReviewCommentActions
     />,
   );
 
@@ -1460,9 +1460,9 @@ test('file comments can be created for GitLab merge requests but not GitHub pull
   const view = await renderReact(
     <ReviewCodeViewHarness
       files={[file]}
+      isPullRequest
       onCreateComment={onCreateComment}
       source={gitLabSource}
-      supportsReviewCommentActions
     />,
   );
 
@@ -1483,9 +1483,9 @@ test('file comments can be created for GitLab merge requests but not GitHub pull
     await view.rerender(
       <ReviewCodeViewHarness
         files={[file]}
+        isPullRequest
         onCreateComment={onCreateComment}
         source={gitHubSource}
-        supportsReviewCommentActions
       />,
     );
     expect(view.container.querySelector('.codiff-file-comment-button')).toBeNull();
@@ -1510,12 +1510,12 @@ test('file-level review comments render as measured file annotations', async () 
         },
       ]}
       files={[file]}
+      isPullRequest
       source={{
         provider: 'gitlab',
         type: 'pull-request',
         url: 'https://gitlab.example.com/group/project/-/merge_requests/1',
       }}
-      supportsReviewCommentActions
     />,
   );
 

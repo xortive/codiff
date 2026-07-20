@@ -168,6 +168,7 @@ export function ReviewCodeViewHarness({ files, ...overrides }: ReviewCodeViewHar
       forceExpandedPaths={new Set()}
       gitIdentity={null}
       hunkNavigation={null}
+      isPullRequest={false}
       itemVersionByKey={{}}
       keymap={defaultKeymap}
       loadingSectionIds={new Set()}
@@ -187,7 +188,6 @@ export function ReviewCodeViewHarness({ files, ...overrides }: ReviewCodeViewHar
       selectedPath={null}
       showWhitespace={false}
       source={source}
-      supportsReviewCommentActions={false}
       viewed={{}}
       walkthroughNotes={new Map()}
       wordWrap={false}

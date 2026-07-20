@@ -41,6 +41,10 @@ import {
 } from './app/hooks/useDocumentAppearance.ts';
 import { useResizableSidebar } from './app/hooks/useResizableSidebar.ts';
 import { useReviewFileState } from './app/hooks/useReviewState.ts';
+import {
+  LocalMergeRequestReviewHost,
+  shouldUseLocalMergeRequestHost,
+} from './app/LocalMergeRequestReviewHost.tsx';
 import { createDefaultConfig } from './config/defaults.ts';
 import { getShortcutLabel } from './config/keymap.ts';
 import type { CodiffConfig } from './config/types.ts';
@@ -1591,6 +1595,20 @@ export default function App() {
     );
   }
 
+  if (shouldUseLocalMergeRequestHost(state.source)) {
+    return (
+      <LocalMergeRequestReviewHost
+        gitIdentity={gitIdentity}
+        initialMode={
+          launchOptions.walkthrough || launchOptions.walkthroughFile ? 'walkthrough' : 'tree'
+        }
+        onHome={() => selectSource({ type: 'working-tree' })}
+        preferences={preferences}
+        state={state}
+      />
+    );
+  }
+
   const selectedOrSearchPath = activeDiffSearchMatch?.filePath ?? selectedPath;
   const visibleSelectedPath =
     selectedOrSearchPath && visibleFiles.some((file) => file.path === selectedOrSearchPath)
@@ -1651,6 +1669,7 @@ export default function App() {
     focusCommentRequest,
     gitIdentity,
     hunkNavigation,
+    isPullRequest,
     itemVersionByKey,
     keymap: codiffConfig.keymap,
     loadingSectionIds,
@@ -1684,7 +1703,6 @@ export default function App() {
         }
       />
     ) : undefined,
-    supportsReviewCommentActions: isPullRequest,
     theme: preferences.theme,
     viewed,
     wordWrap,
@@ -1853,9 +1871,11 @@ export default function App() {
           narrativeWalkthrough={narrativeWalkthrough}
           onActivatePath={activatePath}
           onLoadMoreHistory={loadMoreHistory}
+          onModeChange={changeSidebarMode}
           onSearchQueryChange={
             sidebarMode === 'history' ? setHistorySearchQuery : setFileSearchQuery
           }
+          onSelectPath={activatePath}
           onSelectSource={selectSource}
           onShareWalkthrough={enabledShareWalkthrough}
           onToggleCommitView={showPlainCommitView ? closeCommitView : openCommitView}
@@ -1868,7 +1888,9 @@ export default function App() {
           viewed={viewed}
           walkthroughError={walkthroughError}
           walkthroughLoading={walkthroughLoading}
+          walkthroughOutdatedPaths={reloadDeltaPaths}
           walkthroughProgress={walkthroughProgress}
+          walkthroughUnread={walkthroughUnread}
         />
       </aside>
       <div aria-hidden className="sidebar-resizer" onPointerDown={resizeSidebar} />
