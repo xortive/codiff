@@ -117,6 +117,7 @@ const {
   parseStructuredModelResponse,
 } = require('./walkthrough-model-invocation.cjs');
 const { readStoredWalkthrough, writeStoredWalkthrough } = require('./walkthrough-store.cjs');
+const { parsePersistedWalkthrough } = require('./walkthrough-authoring-bridge.cjs');
 const { uploadSharedSnapshot } = require('./shared-walkthrough-upload.cjs');
 const {
   resolvePlanShareTarget,
@@ -1784,11 +1785,12 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
         abortController.signal.throwIfAborted();
         return {
           status: 'ready',
-          walkthrough: normalizeNarrativeWalkthrough(input, state.files, {
+          walkthrough: await normalizeNarrativeWalkthrough(input, state.files, {
             agent: agent.id,
             branch: state.branch,
             context: sessionContext,
             generatedAt: state.generatedAt,
+            model: 'imported',
             root: state.root,
             source: state.source,
           }),
@@ -1842,7 +1844,15 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
       state,
     });
     if (!options?.force) {
-      const cachedWalkthrough = readStoredWalkthrough(cacheKey);
+      const storedWalkthrough = readStoredWalkthrough(cacheKey);
+      let cachedWalkthrough = null;
+      try {
+        cachedWalkthrough = storedWalkthrough
+          ? await parsePersistedWalkthrough(storedWalkthrough)
+          : null;
+      } catch {
+        // Ignore malformed cache entries and regenerate from current inputs.
+      }
       if (cachedWalkthrough) {
         reportProgress({
           completed: 1,
@@ -1851,18 +1861,27 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
           total: 1,
           units: [{ id: 'narrative', label: 'Walkthrough narrative', status: 'ready' }],
         });
+        const walkthrough =
+          cachedWalkthrough.version === 5
+            ? walkthroughContext
+              ? {
+                  ...cachedWalkthrough,
+                  narrative: {
+                    ...cachedWalkthrough.narrative,
+                    context: walkthroughContext,
+                  },
+                }
+              : cachedWalkthrough
+            : {
+                ...cachedWalkthrough,
+                ...(walkthroughContext ? { context: walkthroughContext } : {}),
+                agent: agent.id,
+                repo: { branch: state.branch, root: state.root },
+                source: state.source,
+              };
         return {
           status: 'ready',
-          walkthrough: {
-            ...cachedWalkthrough,
-            ...(walkthroughContext ? { context: walkthroughContext } : {}),
-            agent: agent.id,
-            repo: {
-              branch: state.branch,
-              root: state.root,
-            },
-            source: state.source,
-          },
+          walkthrough,
         };
       }
     }
@@ -1947,8 +1966,11 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
       }
       abortController.signal.throwIfAborted();
       try {
-        const cacheableWalkthrough = { ...walkthrough };
-        delete cacheableWalkthrough.context;
+        const cacheableWalkthrough = {
+          ...walkthrough,
+          narrative: { ...walkthrough.narrative },
+        };
+        delete cacheableWalkthrough.narrative.context;
         writeStoredWalkthrough(cacheKey, cacheableWalkthrough);
       } catch {
         // Caching is optional; a filesystem failure must not hide a generated result.
