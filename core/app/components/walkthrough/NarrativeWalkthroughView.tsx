@@ -1,11 +1,3 @@
-import { ArrowLeftIcon as ArrowLeft } from '@phosphor-icons/react/ArrowLeft';
-import { ArrowRightIcon as ArrowRight } from '@phosphor-icons/react/ArrowRight';
-import { CaretLeftIcon as CaretLeft } from '@phosphor-icons/react/CaretLeft';
-import { CaretRightIcon as CaretRight } from '@phosphor-icons/react/CaretRight';
-import { CheckIcon as Check } from '@phosphor-icons/react/Check';
-import { GitBranchIcon as GitBranch } from '@phosphor-icons/react/GitBranch';
-import { PathIcon as Path } from '@phosphor-icons/react/Path';
-import { ShareNetworkIcon as ShareNetwork } from '@phosphor-icons/react/ShareNetwork';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { ReviewIdentity } from '../../../lib/app-types.ts';
 import type { ReviewScrollBehavior } from '../../../lib/app-types.ts';
@@ -24,6 +16,7 @@ import {
   type WalkthroughStopView,
 } from '../../../lib/narrative-walkthrough.ts';
 import type { ChangedFile, NarrativeWalkthrough, WalkthroughHunkGroup } from '../../../types.ts';
+import { CommitRefTooltip } from '../CommitRefTooltip.tsx';
 import type { ReviewDiffBlock } from '../ReviewCodeView.tsx';
 import {
   CommitView,
@@ -31,6 +24,17 @@ import {
   type CommitMessageHandler,
   type CommitOutputSubscriber,
 } from './CommitView.tsx';
+import {
+  ArrowLeft,
+  ArrowRight,
+  ArrowsClockwise,
+  CaretLeft,
+  CaretRight,
+  Check,
+  GitBranch,
+  Path,
+  ShareNetwork,
+} from './icons.tsx';
 import { ChapterIcon, ImportancePill, Narration } from './parts.tsx';
 import type { NarrativeNavigation } from './useNarrativeNavigation.ts';
 
@@ -153,6 +157,29 @@ function StopHeader({ current, stop }: { current: boolean; stop: WalkthroughStop
         <ImportancePill importance={stop.importance} />
       </div>
       <Narration prose={stop.prose} />
+      {stop.commentReferences?.length ? (
+        <div className="wt-comment-references">
+          {stop.commentReferences.map((comment) => (
+            <div className={`wt-comment-reference ${comment.status}`} key={comment.id}>
+              <div>
+                {comment.url ? (
+                  <a href={comment.url} rel="noreferrer" target="_blank">Review comment by {comment.authorName}</a>
+                ) : (
+                  <strong>Review comment by {comment.authorName}</strong>
+                )}
+                <span>
+                  {comment.status === 'resolved-by-change'
+                    ? 'Addressed in this version'
+                    : comment.status === 'outdated'
+                      ? 'Code changed since comment'
+                      : 'Related comment'}
+                </span>
+              </div>
+              <blockquote>{comment.body}</blockquote>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -169,6 +196,90 @@ function SupportHeader({ current }: { current: boolean }) {
   );
 }
 
+function CommitBoundary({
+  commit,
+}: {
+  commit: NonNullable<NarrativeWalkthrough['chapters'][number]['commit']>;
+}) {
+  const rebaseDrivers = commit.rebaseDrivers ?? [];
+  return (
+    <div className="wt-main-commit-section">
+      <div className="wt-main-commit-boundary" title={`${commit.shortSha} ${commit.subject}`}>
+        <span>Commit</span>
+        <CommitRefTooltip
+          commit={{
+            sha: commit.gitSha ?? commit.sha,
+            shortSha: commit.shortSha,
+            subject: commit.subject,
+            webUrl: commit.webUrl,
+          }}
+        />
+        <strong>{commit.subject}</strong>
+      </div>
+      {rebaseDrivers.length > 0 ? (
+        <div className="wt-main-rebase-context">
+          <strong>Revised due to rebase</strong>
+          <div className="wt-main-rebase-drivers">
+            {rebaseDrivers.map((driver) => (
+              <div key={`${driver.shortSha}:${driver.subject}`}>
+                <CommitRefTooltip
+                  commit={{
+                    authoredAt: driver.authoredAt,
+                    authorName: driver.authorName,
+                    sha: driver.sha ?? driver.shortSha,
+                    shortSha: driver.shortSha,
+                    subject: driver.subject,
+                    webUrl: driver.webUrl,
+                  }}
+                />
+                <span>{driver.subject}</span>
+                {driver.overlappingPaths?.length ? (
+                  <small>Overlaps {driver.overlappingPaths.join(', ')}</small>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : commit.revisionCause ? (
+        <div className="wt-main-rebase-context legacy" title={commit.revisionCause}>
+          <strong>Revised due to rebase</strong>
+          <span>{commit.revisionCause}</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ChangedHeader({
+  current,
+  onRegenerate,
+  regenerateDisabled = false,
+}: {
+  current: boolean;
+  onRegenerate?: () => void;
+  regenerateDisabled?: boolean;
+}) {
+  return (
+    <div className={`wt-stop-block wt-stop-block-header${current ? ' current' : ''}`}>
+      <div className="wt-stage-title-row">
+        <h2 className="wt-stage-title">Changed</h2>
+        {onRegenerate ? (
+          <button
+            className="wt-regenerate"
+            disabled={regenerateDisabled}
+            onClick={onRegenerate}
+            type="button"
+          >
+            <ArrowsClockwise size={13} weight="bold" />
+            {regenerateDisabled ? 'Regenerating…' : 'Regenerate walkthrough'}
+          </button>
+        ) : null}
+      </div>
+      <Narration prose="These changes arrived after the walkthrough was generated and are not part of its narrative yet." />
+    </div>
+  );
+}
+
 const createWalkthroughBlocks = (
   files: ReadonlyArray<ChangedFile>,
   walkthroughView: WalkthroughView,
@@ -178,36 +289,45 @@ const createWalkthroughBlocks = (
   const firstBlockIdByStop: Array<string | null> = [];
   const stopIndexByBlockId = new Map<string, number>();
 
-  for (const stop of walkthroughView.sequence) {
-    const focusedRuns = getFocusedRunDiffs(stop, files);
-    if (focusedRuns.length === 0) {
-      const blockId = `walkthrough:${stop.id}:missing`;
-      firstBlockIdByStop[stop.index] = blockId;
-      stopIndexByBlockId.set(blockId, stop.index);
+  for (const chapter of walkthroughView.chapters) {
+    if (chapter.commit) {
       blocks.push({
-        header: <StopHeader current={stop.index === currentIndex} stop={stop} />,
-        headerSelected: stop.index === currentIndex,
-        id: blockId,
+        header: <CommitBoundary commit={chapter.commit} />,
+        headerSelected: false,
+        id: `walkthrough:commit:${chapter.commit.sha}`,
       });
-      continue;
     }
+    for (const stop of chapter.stops) {
+      const header = <StopHeader current={stop.index === currentIndex} stop={stop} />;
+      const focusedRuns = getFocusedRunDiffs(stop, files);
+      if (focusedRuns.length === 0) {
+        const blockId = `walkthrough:${stop.id}:missing`;
+        firstBlockIdByStop[stop.index] = blockId;
+        stopIndexByBlockId.set(blockId, stop.index);
+        blocks.push({
+          header,
+          headerSelected: stop.index === currentIndex,
+          id: blockId,
+        });
+        continue;
+      }
 
-    firstBlockIdByStop[stop.index] = `walkthrough:${stop.id}:0`;
+      firstBlockIdByStop[stop.index] = `walkthrough:${stop.id}:0`;
 
-    focusedRuns.forEach(({ file, note, reviewIdentity }, runIndex) => {
-      const blockId = `walkthrough:${stop.id}:${runIndex}`;
-      stopIndexByBlockId.set(blockId, stop.index);
-      blocks.push({
-        file,
-        header:
-          runIndex === 0 ? <StopHeader current={stop.index === currentIndex} stop={stop} /> : null,
-        headerSelected: stop.index === currentIndex,
-        id: blockId,
-        itemIdPrefix: blockId,
-        note,
-        reviewIdentity,
+      focusedRuns.forEach(({ file, note, reviewIdentity }, runIndex) => {
+        const blockId = `walkthrough:${stop.id}:${runIndex}`;
+        stopIndexByBlockId.set(blockId, stop.index);
+        blocks.push({
+          file,
+          header: runIndex === 0 ? header : null,
+          headerSelected: stop.index === currentIndex,
+          id: blockId,
+          itemIdPrefix: blockId,
+          note,
+          reviewIdentity,
+        });
       });
-    });
+    }
   }
 
   return { blocks, firstBlockIdByStop, stopIndexByBlockId };
@@ -231,6 +351,9 @@ const createSupportBlocks = (
   selected: boolean,
   walkthroughView: WalkthroughView,
   showWhitespace: boolean,
+  changedPaths?: ReadonlySet<string>,
+  onRegenerateWalkthrough?: () => void,
+  regenerateDisabled?: boolean,
 ): ReadonlyArray<ReviewDiffBlock> => {
   const blocks: Array<ReviewDiffBlock> = [];
   for (const group of walkthroughView.supportByReason) {
@@ -252,7 +375,13 @@ const createSupportBlocks = (
   }
 
   const uncoveredFiles = getUncoveredWalkthroughFiles(files, walkthroughView, showWhitespace);
-  for (const file of uncoveredFiles) {
+  // Changes that arrived after the walkthrough was generated (e.g. via an
+  // in-place refresh) get their own "Changed" section; other uncovered hunks
+  // stay under "Support" as before.
+  const changedFiles = uncoveredFiles.filter((file) => changedPaths?.has(file.path));
+  const uncoveredSupportFiles = uncoveredFiles.filter((file) => !changedPaths?.has(file.path));
+
+  for (const file of uncoveredSupportFiles) {
     const blockId = `walkthrough:uncovered:${file.path}`;
     const isFirstBlock = blocks.length === 0;
     blocks.push({
@@ -268,6 +397,29 @@ const createSupportBlocks = (
       },
     });
   }
+
+  changedFiles.forEach((file, fileIndex) => {
+    const blockId = `walkthrough:changed:${file.path}`;
+    blocks.push({
+      file,
+      header:
+        fileIndex === 0 ? (
+          <ChangedHeader
+            current={selected}
+            onRegenerate={onRegenerateWalkthrough}
+            regenerateDisabled={regenerateDisabled}
+          />
+        ) : null,
+      headerSelected: selected,
+      id: blockId,
+      itemIdPrefix: blockId,
+      note: 'Changed after the walkthrough was generated.',
+      reviewIdentity: {
+        fingerprint: file.fingerprint,
+        key: blockId,
+      },
+    });
+  });
 
   return blocks;
 };
@@ -395,6 +547,17 @@ function Arc({
             <div className="wt-arc-chapter">
               <span className="wt-arc-chapter-label">
                 <ChapterIcon icon={chapter.icon} size={13} />
+                {chapter.commit ? (
+                  <CommitRefTooltip
+                    className="wt-arc-commit-ref"
+                    commit={{
+                      sha: chapter.commit.gitSha ?? chapter.commit.sha,
+                      shortSha: chapter.commit.shortSha,
+                      subject: chapter.commit.subject,
+                      webUrl: chapter.commit.webUrl,
+                    }}
+                  />
+                ) : null}
                 {chapter.title}
               </span>
               <div className="wt-arc-nodes">
@@ -497,26 +660,32 @@ function Arc({
 
 export function NarrativeWalkthroughView({
   allowCommit = true,
+  changedPaths,
   files,
   navigation,
   onActiveReviewTargetChange,
   onCommit,
   onCommitOutput,
+  onRegenerateWalkthrough,
   onShareWalkthrough,
   onUpdateCommitMessage,
+  regenerateDisabled,
   renderDiffBlocks,
   shareWalkthroughDisabled,
   showWhitespace,
   walkthrough,
 }: {
   allowCommit?: boolean;
+  changedPaths?: ReadonlySet<string>;
   files: ReadonlyArray<ChangedFile>;
   navigation: NarrativeNavigation;
   onActiveReviewTargetChange: (target: WalkthroughReviewTarget | null) => void;
   onCommit: CommitHandler;
   onCommitOutput?: CommitOutputSubscriber;
+  onRegenerateWalkthrough?: () => void;
   onShareWalkthrough?: () => void;
   onUpdateCommitMessage: CommitMessageHandler;
+  regenerateDisabled?: boolean;
   renderDiffBlocks: RenderWalkthroughDiffBlocks;
   shareWalkthroughDisabled?: boolean;
   showWhitespace: boolean;
@@ -534,9 +703,25 @@ export function NarrativeWalkthroughView({
   const supportBlocks = useMemo(
     () =>
       walkthroughView
-        ? createSupportBlocks(files, navigation.mode === 'support', walkthroughView, showWhitespace)
+        ? createSupportBlocks(
+            files,
+            navigation.mode === 'support',
+            walkthroughView,
+            showWhitespace,
+            changedPaths,
+            onRegenerateWalkthrough,
+            regenerateDisabled,
+          )
         : [],
-    [files, navigation.mode, showWhitespace, walkthroughView],
+    [
+      changedPaths,
+      files,
+      navigation.mode,
+      onRegenerateWalkthrough,
+      regenerateDisabled,
+      showWhitespace,
+      walkthroughView,
+    ],
   );
   const supportAvailable = supportBlocks.length > 0;
   const firstSupportBlockId = supportBlocks[0]?.id ?? null;

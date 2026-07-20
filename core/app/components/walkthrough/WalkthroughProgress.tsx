@@ -16,10 +16,14 @@ export const nextWalkthroughResponseLabelIndex = (current: number) =>
 const TIMER_THRESHOLD_SECONDS = 3;
 
 export function WalkthroughProgress({
+  detail,
+  label: labelOverride,
   phase,
   responseLabelIndex,
   stageRevision,
 }: {
+  detail?: string | null;
+  label?: string;
   phase: WalkthroughProgressPhase | null;
   responseLabelIndex: number;
   stageRevision: number;
@@ -40,21 +44,25 @@ export function WalkthroughProgress({
   const elapsedSeconds = timerState.stageRevision === stageRevision ? timerState.elapsedSeconds : 0;
   const showTimer = elapsedSeconds >= TIMER_THRESHOLD_SECONDS;
   const label =
-    phase === 'agent-generation'
+    labelOverride ??
+    (phase === 'agent-generation'
       ? 'Analyzing changes…'
       : phase === 'response-received'
         ? walkthroughResponseLabels[Math.abs(responseLabelIndex) % walkthroughResponseLabels.length]
-        : 'Generating walkthrough…';
+        : 'Generating walkthrough…');
 
   return (
     <span aria-live="polite" className="walkthrough-progress" role="status">
-      <span className="walkthrough-progress-label">{label}</span>
-      <span
+      <span className="walkthrough-progress-label">
+        {label}{detail ? ` · ${detail}` : ''}
+      </span>
+      <time
         aria-hidden={!showTimer}
         className={`walkthrough-progress-timer${showTimer ? ' visible' : ''}`}
+        dateTime={`PT${elapsedSeconds}S`}
       >
         {showTimer ? `${elapsedSeconds}s` : '0s'}
-      </span>
+      </time>
     </span>
   );
 }

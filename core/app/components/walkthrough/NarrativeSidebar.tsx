@@ -1,7 +1,4 @@
-import { CheckIcon as Check } from '@phosphor-icons/react/Check';
-import { GitBranchIcon as GitBranch } from '@phosphor-icons/react/GitBranch';
-import { PathIcon as Path } from '@phosphor-icons/react/Path';
-import { ShareNetworkIcon as ShareNetwork } from '@phosphor-icons/react/ShareNetwork';
+import { getAgentLabel } from '../../../lib/app-constants.ts';
 import { renderInlineMarkdown } from '../../../lib/markdown.tsx';
 import {
   buildCommitModel,
@@ -13,8 +10,12 @@ import {
   type WalkthroughStopView,
 } from '../../../lib/narrative-walkthrough.ts';
 import type { ChangedFile, NarrativeWalkthrough } from '../../../types.ts';
+import { CommitRefTooltip } from '../CommitRefTooltip.tsx';
+import { ArrowsClockwise, Check, GitBranch, Path, ShareNetwork } from './icons.tsx';
 import { ChapterIcon } from './parts.tsx';
 import type { NarrativeNavigation } from './useNarrativeNavigation.ts';
+
+const agentLabel = (agentId: NarrativeWalkthrough['agent']) => getAgentLabel(agentId);
 
 function TocFileRows({
   files,
@@ -88,11 +89,13 @@ function TocStop({
 }
 
 function SupportingFilesStop({
+  changedPaths,
   files,
   navigation,
   showWhitespace,
   walkthroughView,
 }: {
+  changedPaths?: ReadonlySet<string>;
   files: ReadonlyArray<ChangedFile>;
   navigation: NarrativeNavigation;
   showWhitespace: boolean;
@@ -102,7 +105,7 @@ function SupportingFilesStop({
     files,
     walkthroughView,
     showWhitespace,
-  );
+  ).filter((file) => !changedPaths?.has(file.path));
   if (walkthroughView.support.length === 0 && uncoveredFiles.length === 0) {
     return null;
   }
@@ -147,18 +150,111 @@ function SupportingFilesStop({
   );
 }
 
-export function NarrativeSidebar({
-  allowCommit = true,
+function ChangedFilesStop({
+  changedPaths,
   files,
   navigation,
+  showWhitespace,
+  walkthroughView,
+}: {
+  changedPaths?: ReadonlySet<string>;
+  files: ReadonlyArray<ChangedFile>;
+  navigation: NarrativeNavigation;
+  showWhitespace: boolean;
+  walkthroughView: WalkthroughView;
+}) {
+  const changedFiles = getUncoveredWalkthroughFileLineItems(
+    files,
+    walkthroughView,
+    showWhitespace,
+  ).filter((file) => changedPaths?.has(file.path));
+  if (changedFiles.length === 0) {
+    return null;
+  }
+  const fileRows = formatWalkthroughFileLineRows(changedFiles);
+  return (
+    <div className="wt-toc-chapter">
+      <div className="wt-toc-chapter-head">
+        <span className="wt-toc-chapter-icon">
+          <ArrowsClockwise size={15} />
+        </span>
+        <span className="wt-toc-chapter-title">Changed</span>
+      </div>
+      <div className="wt-toc-stops">
+        <button
+          className="wt-toc-stop"
+          onClick={navigation.openSupport}
+          title="Changed after the walkthrough was generated"
+          type="button"
+        >
+          <span className="wt-toc-rail">
+            <span className="wt-toc-node" />
+          </span>
+          <span className="wt-toc-main">
+            <TocFileRows files={fileRows} />
+          </span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const commitEvolutionKindClass = (kind: string | undefined) => {
+  switch (kind) {
+    case 'added':
+    case 'introduced':
+      return 'evolution-added';
+    case 'removed':
+      return 'evolution-removed';
+    case 'likely-revised':
+    case 'revised':
+      return 'evolution-revised';
+    case 'absorbed-into-base':
+      return 'evolution-absorbed';
+    case 'ambiguous':
+      return 'evolution-ambiguous';
+    default:
+      return 'evolution-unchanged';
+  }
+};
+
+const commitEvolutionSymbol = (kind: string | undefined) => {
+  switch (kind) {
+    case 'added':
+    case 'introduced':
+      return '+';
+    case 'removed':
+      return '−';
+    case 'likely-revised':
+    case 'revised':
+      return '~';
+    case 'absorbed-into-base':
+      return '↳';
+    case 'ambiguous':
+      return '?';
+    default:
+      return '·';
+  }
+};
+
+export function NarrativeSidebar({
+  allowCommit = true,
+  changedPaths,
+  commitEvolutionKinds,
+  files,
+  navigation,
+  onRegenerateWalkthrough,
   onShareWalkthrough,
   shareWalkthroughDisabled = false,
   showWhitespace,
   walkthrough,
 }: {
   allowCommit?: boolean;
+  changedPaths?: ReadonlySet<string>;
+  commitEvolutionKinds?: ReadonlyMap<string, string>;
   files: ReadonlyArray<ChangedFile>;
   navigation: NarrativeNavigation;
+  onRegenerateWalkthrough?: () => void;
   onShareWalkthrough?: () => void;
   shareWalkthroughDisabled?: boolean;
   showWhitespace: boolean;
@@ -183,13 +279,75 @@ export function NarrativeSidebar({
   return (
     <div className="walkthrough-list">
       <div className="wt-focus">
-        <span className="wt-focus-label">Review focus</span>
+        <div className="wt-focus-header">
+          <span className="wt-focus-label">Review focus</span>
+          {onRegenerateWalkthrough ? (
+            <button
+              aria-label="Regenerate walkthrough"
+              className="wt-regen-button"
+              onClick={onRegenerateWalkthrough}
+              title="Regenerate full walkthrough"
+              type="button"
+            >
+              Regen walkthrough
+            </button>
+          ) : null}
+        </div>
         <p>{renderInlineMarkdown(walkthrough.focus)}</p>
       </div>
 
       <div className="wt-toc-scroll">
         {walkthroughView.chapters.map((chapter) => (
-          <div className="wt-toc-chapter" key={chapter.id}>
+          <div
+            className={`wt-toc-chapter${chapter.commit ? ' commit-boundary' : ''}`}
+            key={chapter.id}
+          >
+            {chapter.commit ? (
+              <div
+                className={`wt-commit-boundary-label${commitEvolutionKinds ? ` ${commitEvolutionKindClass(commitEvolutionKinds.get(chapter.commit.sha))}` : ''}`}
+                title={[
+                  `${chapter.commit.shortSha} ${chapter.commit.subject}`,
+                  ...(chapter.commit.rebaseDrivers ?? []).map(
+                    (driver) => `${driver.shortSha} ${driver.subject}`,
+                  ),
+                  chapter.commit.revisionCause,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              >
+                {commitEvolutionKinds ? (
+                  <span
+                    className={`wt-commit-evolution-indicator ${commitEvolutionKindClass(commitEvolutionKinds.get(chapter.commit.sha))}`}
+                  >
+                    {commitEvolutionSymbol(commitEvolutionKinds.get(chapter.commit.sha))}
+                  </span>
+                ) : null}
+                <CommitRefTooltip
+                  commit={{
+                    sha: chapter.commit.gitSha ?? chapter.commit.sha,
+                    shortSha: chapter.commit.shortSha,
+                    subject: chapter.commit.subject,
+                    webUrl: chapter.commit.webUrl,
+                  }}
+                />
+                <span className="wt-commit-boundary-subject">{chapter.commit.subject}</span>
+                {(chapter.commit.rebaseDrivers?.length ?? 0) > 0 ? (
+                  <span
+                    aria-label={`Revised due to rebase: ${chapter.commit.rebaseDrivers
+                      ?.map((driver) => `${driver.shortSha} ${driver.subject}`)
+                      .join('; ')}`}
+                    className="wt-commit-rebase-badge"
+                    tabIndex={0}
+                  >
+                    Revised due to rebase
+                  </span>
+                ) : chapter.commit.revisionCause ? (
+                  <span className="wt-commit-rebase-badge" title={chapter.commit.revisionCause}>
+                    Revised due to rebase
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
             <div className="wt-toc-chapter-head">
               <span className="wt-toc-chapter-icon">
                 <ChapterIcon icon={chapter.icon} size={15} />
@@ -210,6 +368,14 @@ export function NarrativeSidebar({
           </div>
         ))}
         <SupportingFilesStop
+          changedPaths={changedPaths}
+          files={files}
+          navigation={navigation}
+          showWhitespace={showWhitespace}
+          walkthroughView={walkthroughView}
+        />
+        <ChangedFilesStop
+          changedPaths={changedPaths}
           files={files}
           navigation={navigation}
           showWhitespace={showWhitespace}
@@ -278,3 +444,5 @@ export function NarrativeSidebar({
     </div>
   );
 }
+
+export { agentLabel };
