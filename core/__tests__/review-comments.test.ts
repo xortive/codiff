@@ -5,8 +5,6 @@ import {
   getPendingPullRequestReviewComments,
   getReviewCommentsFromState,
   getVisibleReviewComments,
-  mergeReviewComments,
-  toSubmittedReviewComment,
   toPullRequestReviewComment,
 } from '../lib/review-comments.ts';
 import type { RepositoryState } from '../types.ts';
@@ -74,7 +72,7 @@ test('getReviewCommentsFromState carries the outdated flag through to review com
   expect(comments.find((comment) => comment.id === 'github:2')?.isOutdated).toBeUndefined();
 });
 
-test('getReviewCommentsFromState hydrates shared comments on their exact working-tree section', () => {
+test('getReviewCommentsFromState derives the working-tree section from line coordinates', () => {
   const state = createPullRequestState();
   state.source = { type: 'working-tree' };
   state.files = [
@@ -85,13 +83,15 @@ test('getReviewCommentsFromState hydrates shared comments on their exact working
           binary: false,
           id: 'src/a.ts:staged',
           kind: 'staged',
-          patch: '',
+          patch:
+            'diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-old\n+new',
         },
         {
           binary: false,
           id: 'src/a.ts:unstaged',
           kind: 'unstaged',
-          patch: '',
+          patch:
+            'diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -5 +5 @@\n-old\n+new',
         },
       ],
     },
@@ -103,7 +103,6 @@ test('getReviewCommentsFromState hydrates shared comments on their exact working
       filePath: 'src/a.ts',
       id: 'shared:1',
       lineNumber: 5,
-      sectionId: 'src/a.ts:unstaged',
       side: 'additions',
     },
   ];
@@ -309,39 +308,8 @@ test('serializes file-level thread replies without inventing line metadata', () 
   });
 });
 
-test('serializes section identity only for shared walkthrough comments', () => {
+test('omits UI-only section identity from review comment payloads', () => {
   const comment = createReviewComment({ body: 'Persist this comment.' });
 
   expect(toPullRequestReviewComment(comment)).not.toHaveProperty('sectionId');
-  expect(toPullRequestReviewComment(comment, { includeSectionId: true })).toMatchObject({
-    sectionId: 'src/a.ts:pull-request:1',
-  });
-});
-
-test('keeps a submitted shared comment visible until the matching snapshot comment arrives', () => {
-  const draft = createReviewComment({
-    id: 'draft-comment',
-    remoteSubmit: { status: 'submitting' },
-  });
-  const submitted = toSubmittedReviewComment(
-    {
-      author: { login: 'ada', name: 'Ada Lovelace' },
-      body: draft.body,
-      canDelete: true,
-      canEdit: true,
-      filePath: draft.filePath,
-      id: 'persisted-comment',
-      lineNumber: draft.lineNumber,
-      sectionId: draft.sectionId,
-      side: draft.side,
-      submittedAt: '2026-07-16T12:00:00.000Z',
-      threadId: 'persisted-thread',
-    },
-    draft,
-  );
-
-  expect(mergeReviewComments([], [submitted])).toEqual([submitted]);
-
-  const snapshotComment = { ...submitted, body: 'Canonical server comment.' };
-  expect(mergeReviewComments([snapshotComment], [submitted])).toEqual([snapshotComment]);
 });

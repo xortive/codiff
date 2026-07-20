@@ -1107,7 +1107,6 @@ export type PullRequestReviewComment = {
   body: string;
   filePath: string;
   lineNumber?: number;
-  sectionId?: string;
   side?: 'additions' | 'deletions';
   startLineNumber?: number;
   startSide?: 'additions' | 'deletions';

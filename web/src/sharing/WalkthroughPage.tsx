@@ -81,7 +81,6 @@ const reviewComments = (
         ? { anchor: 'file' as const }
         : {
             lineNumber: thread.lineNumber!,
-            ...(thread.sectionId ? { sectionId: thread.sectionId } : {}),
             side: thread.side!,
             ...(thread.startLineNumber ? { startLineNumber: thread.startLineNumber } : {}),
             ...(thread.startSide ? { startSide: thread.startSide } : {}),
@@ -140,7 +139,6 @@ const commentTarget = (comment: PullRequestReviewComment) => {
     filePath: comment.filePath,
     kind: 'walkthrough-diff' as const,
     lineNumber: comment.lineNumber,
-    ...(comment.sectionId ? { sectionId: comment.sectionId } : {}),
     side: comment.side,
     ...(comment.startLineNumber ? { startLineNumber: comment.startLineNumber } : {}),
     ...(comment.startSide ? { startSide: comment.startSide } : {}),
@@ -288,7 +286,7 @@ const Viewer = ({ walkthrough: walkthroughRef }: { walkthrough: ViewRef<'Walkthr
             ],
             planId: null,
             resolvedAt: null,
-            sectionId: fileComment ? null : (target.sectionId ?? null),
+            sectionId: null,
             side: fileComment ? null : target.side,
             startLineNumber: fileComment ? null : (target.startLineNumber ?? null),
             startSide: fileComment ? null : (target.startSide ?? null),
