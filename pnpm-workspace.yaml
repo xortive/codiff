@@ -32,9 +32,7 @@ onlyBuiltDependencies:
   - electron-winstaller
   - unrs-resolver
 overrides:
-  extract-zip>yauzl: ^3.4.0
-  vite: 'catalog:'
-  vitest: 'catalog:'
+  codiff: 'link:'
 peerDependencyRules:
   allowAny:
     - vite

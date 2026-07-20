@@ -1,13 +1,16 @@
 import { expect, test } from 'vite-plus/test';
 import {
   createFakeGitLabTransport,
+  fetchGitLabMergeRequestVersionCompare,
   fetchGitLabMergeRequestVersions,
   projectCommitEvolution,
   projectReviewPlan,
-  projectVersionCompare,
   toGitLabDiffIdentity,
 } from '../src/index.ts';
-import { matchVersionCommitStacks, createCommitPatchSignature } from '../src/version-commit-evolution.ts';
+import {
+  matchVersionCommitStacks,
+  createCommitPatchSignature,
+} from '../src/version-commit-evolution.ts';
 
 test('loads merge request versions through the injected transport', async () => {
   const transport = createFakeGitLabTransport([
@@ -15,18 +18,18 @@ test('loads merge request versions through the injected transport', async () => 
       path: '/api/v4/projects/group%2Fproject/merge_requests/7/versions',
       response: [
         {
-          id: 2,
-          head_commit_sha: 'b'.repeat(40),
           base_commit_sha: 'a'.repeat(40),
-          start_commit_sha: 'a'.repeat(40),
           created_at: '2026-01-02T00:00:00.000Z',
+          head_commit_sha: 'b'.repeat(40),
+          id: 2,
+          start_commit_sha: 'a'.repeat(40),
         },
         {
-          id: 1,
-          head_commit_sha: 'c'.repeat(40),
           base_commit_sha: 'a'.repeat(40),
-          start_commit_sha: 'a'.repeat(40),
           created_at: '2026-01-01T00:00:00.000Z',
+          head_commit_sha: 'c'.repeat(40),
+          id: 1,
+          start_commit_sha: 'a'.repeat(40),
         },
       ],
     },
@@ -43,6 +46,80 @@ test('loads merge request versions through the injected transport', async () => 
   expect(versions[0]?.label).toContain('v2');
   expect(toGitLabDiffIdentity(versions[0]!).headSha).toBe('b'.repeat(40));
   expect(transport.calls[0]?.path).toContain('/merge_requests/7/versions');
+});
+
+test('uses fetched discussion anchors with supplied unrelated comment anchors', async () => {
+  const baseSha = 'a'.repeat(40);
+  const commentHeadSha = 'b'.repeat(40);
+  const latestHeadSha = 'c'.repeat(40);
+  const transport = createFakeGitLabTransport([
+    {
+      path: '/api/v4/projects/group%2Fproject/merge_requests/7/versions',
+      response: [
+        {
+          base_commit_sha: baseSha,
+          created_at: '2026-01-02T00:00:00.000Z',
+          head_commit_sha: latestHeadSha,
+          id: 2,
+          start_commit_sha: baseSha,
+        },
+        {
+          base_commit_sha: baseSha,
+          created_at: '2026-01-01T00:00:00.000Z',
+          head_commit_sha: commentHeadSha,
+          id: 1,
+          start_commit_sha: baseSha,
+        },
+      ],
+    },
+    {
+      path: '/api/v4/projects/group%2Fproject/merge_requests/7/discussions',
+      response: [
+        {
+          notes: [
+            {
+              id: 42,
+              position: {
+                base_sha: baseSha,
+                head_sha: commentHeadSha,
+                new_line: 1,
+                new_path: 'src/app.ts',
+                start_sha: baseSha,
+              },
+            },
+          ],
+        },
+      ],
+    },
+    {
+      path: '/api/v4/projects/group%2Fproject/merge_requests/7/versions/1',
+      response: { diffs: [] },
+    },
+    {
+      path: '/api/v4/projects/group%2Fproject/merge_requests/7/versions/2',
+      response: { diffs: [] },
+    },
+  ]);
+
+  const comparison = await fetchGitLabMergeRequestVersionCompare({
+    comments: [
+      {
+        commentId: 'gitlab:7',
+        filePath: 'src/unrelated.ts',
+        position: { baseSha, headSha: latestHeadSha, startSha: baseSha },
+      },
+    ],
+    from: { commentId: 'gitlab:42', kind: 'comment-position' },
+    iid: 7,
+    projectPath: 'group/project',
+    to: { kind: 'mr-version', versionId: '2' },
+    transport,
+  });
+
+  expect(comparison.range.from.headSha).toBe(commentHeadSha);
+  expect(transport.calls.some((call) => call.path.endsWith('/merge_requests/7/discussions'))).toBe(
+    true,
+  );
 });
 
 test('projects algorithm evolution into Core review plans', async () => {
@@ -105,9 +182,12 @@ test('projects algorithm evolution into Core review plans', async () => {
     to,
   });
   const projected = projectCommitEvolution(evolution);
-  expect(projected.units.some((unit) => unit.kind === 'revised' || unit.kind === 'rewritten-same-patch' || unit.kind === 'retained')).toBe(
-    true,
-  );
+  expect(
+    projected.units.some(
+      (unit) =>
+        unit.kind === 'revised' || unit.kind === 'rewritten-same-patch' || unit.kind === 'retained',
+    ),
+  ).toBe(true);
   const plan = projectReviewPlan({ evolution, structure: 'auto' });
   expect(plan.structure === 'whole-diff' || plan.structure === 'units').toBe(true);
 });

@@ -1595,7 +1595,11 @@ export default function App() {
     );
   }
 
-  if (shouldUseLocalMergeRequestHost(state.source)) {
+  if (
+    shouldUseLocalMergeRequestHost(state.source) &&
+    !launchOptions.walkthrough &&
+    !launchOptions.walkthroughFile
+  ) {
     return (
       <LocalMergeRequestReviewHost
         gitIdentity={gitIdentity}

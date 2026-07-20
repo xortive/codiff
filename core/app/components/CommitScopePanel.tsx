@@ -8,6 +8,13 @@ import type {
 } from '../../SharedWalkthroughApp.tsx';
 import { CommitRefTooltip } from './CommitRefTooltip.tsx';
 
+const clickedLink = (target: EventTarget | null): boolean =>
+  typeof target === 'object' &&
+  target != null &&
+  'closest' in target &&
+  typeof target.closest === 'function' &&
+  target.closest('a') != null;
+
 export type CommitScopePanelProps = {
   commits: ReadonlyArray<MergeRequestCommitListEntry>;
   mode: 'merge-request' | 'version-compare';
@@ -81,7 +88,7 @@ export function CommitScopePanel({
                 <label
                   key={commit.sha}
                   onClick={(event) => {
-                    if (event.target instanceof HTMLElement && event.target.closest('a')) {
+                    if (clickedLink(event.target)) {
                       return;
                     }
                     event.preventDefault();
@@ -121,7 +128,7 @@ export function CommitScopePanel({
                   <label
                     key={unit.id}
                     onClick={(event) => {
-                      if (event.target instanceof HTMLElement && event.target.closest('a')) {
+                      if (clickedLink(event.target)) {
                         return;
                       }
                       event.preventDefault();

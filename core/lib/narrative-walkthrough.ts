@@ -355,6 +355,25 @@ export const resolveWalkthroughHunkFile = (
   return null;
 };
 
+export const getWalkthroughCommitDiffShas = (
+  walkthrough: Pick<NarrativeWalkthrough, 'chapters'>,
+): ReadonlyArray<string> => {
+  const seen = new Set<string>();
+  return walkthrough.chapters.flatMap((chapter) => {
+    const sha = chapter.commit?.gitSha ?? chapter.commit?.sha;
+    if (!sha || seen.has(sha)) {
+      return [];
+    }
+    seen.add(sha);
+    return [sha];
+  });
+};
+
+export const combineWalkthroughCommitFiles = (
+  commitShas: ReadonlyArray<string>,
+  filesBySha: Readonly<Record<string, ReadonlyArray<ChangedFile>>>,
+): ReadonlyArray<ChangedFile> => commitShas.flatMap((sha) => filesBySha[sha] ?? []);
+
 const walkthroughHunkRunKey = (item: WalkthroughHunkGroup, hunks: ReadonlyArray<WalkthroughHunk>) =>
   `${item.id}:${hunks.map((hunk) => hunk.id).join(',')}`;
 

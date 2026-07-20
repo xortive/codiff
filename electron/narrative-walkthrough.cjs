@@ -442,7 +442,12 @@ const addUnreferencedSupport = (support, index, coveredHunkIds, itemIds) => {
   }
 };
 
-const normalizeNarrativeWalkthrough = async (input, files, facts = {}, hunkIdByAlias = new Map()) => {
+const normalizeNarrativeWalkthrough = async (
+  input,
+  files,
+  facts = {},
+  hunkIdByAlias = new Map(),
+) => {
   if (!input || typeof input !== 'object') {
     throw new Error('Narrative walkthrough is not an object.');
   }
@@ -463,7 +468,8 @@ const normalizeNarrativeWalkthrough = async (input, files, facts = {}, hunkIdByA
           : Date.now(),
     launchPath: typeof facts.root === 'string' ? facts.root : '',
     root: typeof facts.root === 'string' ? facts.root : '',
-    source: facts.source && typeof facts.source === 'object' ? facts.source : { type: 'working-tree' },
+    source:
+      facts.source && typeof facts.source === 'object' ? facts.source : { type: 'working-tree' },
   };
   const agent = normalizeEnum(facts.agent, AGENTS, 'codex');
   const walkthrough = await normalizeSharedWalkthrough(input, state, agent, hunkIdByAlias);
@@ -819,8 +825,15 @@ const buildNarrativeWalkthroughPrompt = async (
   customPrompt,
   previousWalkthrough,
 ) =>
-  (await buildNarrativeWalkthroughRequest(state, context, agentLabel, customPrompt, previousWalkthrough))
-    .prompt;
+  (
+    await buildNarrativeWalkthroughRequest(
+      state,
+      context,
+      agentLabel,
+      customPrompt,
+      previousWalkthrough,
+    )
+  ).prompt;
 
 /**
  * Cache identity for the exact model input. The previous walkthrough is

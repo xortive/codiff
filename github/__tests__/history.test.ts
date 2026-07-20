@@ -7,6 +7,7 @@ import type { ChangedFile } from '@nkzw/codiff-core/types';
 import { expect, test } from 'vite-plus/test';
 import {
   buildBaseMovement,
+  compareGitHubReviewVersions,
   listGitHubReviewVersions,
   normalizeForcePushEvent,
   type GitHubCommitLike,
@@ -26,6 +27,60 @@ test('normalizeForcePushEvent accepts head_ref_force_pushed timeline payloads', 
     before: 'a'.repeat(40),
     createdAt: '2026-01-02T00:00:00.000Z',
   });
+});
+
+test('compareGitHubReviewVersions uses a direct head-to-head diff', async () => {
+  const base = '0'.repeat(40);
+  const before = 'a'.repeat(40);
+  const after = 'b'.repeat(40);
+  const readRangeFilesCalls: Array<[string, string, boolean]> = [];
+  const versions = [
+    {
+      createdAt: '2026-01-01T00:00:00.000Z',
+      id: before,
+      range: {
+        base: { commitId: base, label: { kind: 'commit' as const, text: 'base' } },
+        head: { commitId: before, label: { kind: 'version' as const, text: 'before' } },
+      },
+    },
+    {
+      createdAt: '2026-01-02T00:00:00.000Z',
+      id: after,
+      range: {
+        base: { commitId: base, label: { kind: 'commit' as const, text: 'base' } },
+        head: { commitId: after, label: { kind: 'version' as const, text: 'after' } },
+      },
+    },
+  ];
+  const git: GitHubHistoryGit = {
+    ensureCommit: async (sha) => sha,
+    isAncestor: async () => false,
+    mergeBase: async () => base,
+    readCommitDiff: async () => [],
+    readCommitMeta: async (sha) => ({
+      authoredAt: '2026-01-01T00:00:00.000Z',
+      authorName: 'Ada',
+      parentIds: [],
+      sha,
+      shortSha: sha.slice(0, 7),
+      subject: sha.slice(0, 7),
+    }),
+    readCommitStack: async () => [],
+    readRangeFiles: async (from, to, symmetric) => {
+      readRangeFilesCalls.push([from, to, symmetric]);
+      return [];
+    },
+  };
+
+  const result = await compareGitHubReviewVersions({
+    git,
+    pull: { number: 12, owner: 'nkzw-tech', repo: 'codiff' },
+    range: { fromId: before, toId: after },
+    versions,
+  });
+
+  expect(result.versionCompare.analysis.summary.empty).toBe(true);
+  expect(readRangeFilesCalls[0]).toEqual([before, after, false]);
 });
 
 test('normalizeForcePushEvent ignores non-force-push timeline noise', () => {
@@ -65,6 +120,17 @@ test('listGitHubReviewVersions builds head timeline labels without GitLab versio
   ]);
 
   const { versions, warning } = await listGitHubReviewVersions({
+    git: {
+      ensureCommit: async (sha) => sha,
+      isAncestor: async () => false,
+      mergeBase: async (_base, head) => (head === before ? '1'.repeat(40) : base),
+      readCommitDiff: async () => [],
+      readCommitMeta: async () => {
+        throw new Error('unused');
+      },
+      readCommitStack: async () => [],
+      readRangeFiles: async () => [],
+    },
     pull: {
       number: 12,
       owner: 'nkzw-tech',
@@ -80,6 +146,11 @@ test('listGitHubReviewVersions builds head timeline labels without GitLab versio
   expect(labels.some((label) => label.startsWith('Force-push ·'))).toBe(true);
   expect(labels.at(-1)).toBe('Current head');
   expect(labels.every((label) => !/^v\d+/.test(label))).toBe(true);
+  expect(versions.map((version) => version.range.base.commitId)).toEqual([
+    '1'.repeat(40),
+    base,
+    base,
+  ]);
 });
 
 const commit = (
@@ -133,6 +204,7 @@ test('buildBaseMovement classifies forward base advances with commitsBetween + d
       }
       return false;
     },
+    mergeBase: async () => oldBase,
     readCommitDiff: async () => [],
     readCommitMeta: async (sha) => {
       if (sha === oldBase) {
@@ -184,6 +256,7 @@ test('buildBaseMovement classifies backward base moves', async () => {
   const git: GitHubHistoryGit = {
     ensureCommit: async (sha) => sha,
     isAncestor: async (ancestor, descendant) => ancestor === newBase && descendant === oldBase.sha,
+    mergeBase: async () => newBase,
     readCommitDiff: async () => [],
     readCommitMeta: async (sha) => {
       if (sha === oldBase.sha) {
@@ -223,6 +296,7 @@ test('buildBaseMovement classifies divergent bases', async () => {
   const git: GitHubHistoryGit = {
     ensureCommit: async (sha) => sha,
     isAncestor: async () => false,
+    mergeBase: async () => fromBase,
     readCommitDiff: async () => [],
     readCommitMeta: async (sha) => ({
       authoredAt: '2026-01-01T00:00:00.000Z',

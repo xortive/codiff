@@ -720,24 +720,24 @@ function HistorySidebar({
             type="button"
           >
             <span className="history-entry-ref">
-              {row.source.type === 'commit'
-                ? (
-                    <CommitRefTooltip
-                      commit={{
-                        authoredAt: row.committedAt,
-                        authorName: row.author ?? undefined,
-                        sha: row.source.ref,
-                        shortSha: getShortRef(row.source.ref),
-                        subject: row.subject,
-                        webUrl: getGitLabCommitUrl(row.source.ref),
-                      }}
-                      focusable={false}
-                      linkTrigger={false}
-                    />
-                  )
-                : row.source.type === 'pull-request' || row.source.type === 'branch-diff'
-                  ? row.ref
-                  : 'local'}
+              {row.source.type === 'commit' ? (
+                <CommitRefTooltip
+                  commit={{
+                    authoredAt: row.committedAt,
+                    authorName: row.author ?? undefined,
+                    sha: row.source.ref,
+                    shortSha: getShortRef(row.source.ref),
+                    subject: row.subject,
+                    webUrl: getGitLabCommitUrl(row.source.ref),
+                  }}
+                  focusable={false}
+                  linkTrigger={false}
+                />
+              ) : row.source.type === 'pull-request' || row.source.type === 'branch-diff' ? (
+                row.ref
+              ) : (
+                'local'
+              )}
             </span>
             <span className="history-entry-subject">{row.subject}</span>
             {hasMetadata ? (

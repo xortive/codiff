@@ -316,12 +316,26 @@ const readGitHubImageFile = async (repoRoot, repository, ref, path) => {
 };
 
 /** @param {string} repoRoot @param {PullRequestReference} pullRequest */
-const readPullRequestDiff = async (repoRoot, pullRequest) =>
-  ghApi(repoRoot, [
-    '-H',
-    'Accept: application/vnd.github.v3.diff',
-    `repos/${pullRequest.owner}/${pullRequest.repo}/pulls/${pullRequest.number}`,
-  ]);
+const readPullRequestDiff = async (repoRoot, pullRequest) => {
+  try {
+    return await ghApi(repoRoot, [
+      '-H',
+      'Accept: application/vnd.github.v3.diff',
+      `repos/${pullRequest.owner}/${pullRequest.repo}/pulls/${pullRequest.number}`,
+    ]);
+  } catch (error) {
+    // GitHub rejects the aggregate diff above 20,000 lines, but the paginated
+    // pull-request files response still provides per-file patches. Let the
+    // caller use those patches instead of failing the entire repository load.
+    if (
+      error instanceof Error &&
+      /diff exceeded the maximum number of lines \(20000\).*HTTP 406/i.test(error.message)
+    ) {
+      return '';
+    }
+    throw error;
+  }
+};
 
 /** @param {unknown} side */
 const fromGitHubReviewSide = (side) => (side === 'LEFT' ? 'deletions' : 'additions');
@@ -998,6 +1012,7 @@ module.exports = {
   createPullRequestSection,
   createPullRequestSource,
   getPullRequestHeadImageSource,
+  readPullRequestDiff,
   listPullRequestHistory,
   normalizeGitHubCommit,
   normalizeGitHubPullRequestCommit,

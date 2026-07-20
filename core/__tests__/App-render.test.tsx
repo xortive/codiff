@@ -146,6 +146,10 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     status: 'committed' as const,
   })),
   decreaseCodeFontSize: vi.fn(async () => {}),
+  generateReviewWalkthrough: vi.fn(async () => ({
+    reason: 'Unavailable in tests.',
+    status: 'unavailable' as const,
+  })),
   getAgentSkillStatus: vi.fn(async () => ({
     installed: true,
     path: '/Users/reviewer/.codex/skills/codiff',
@@ -166,6 +170,11 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     email: 'reviewer@example.com',
     name: 'Reviewer',
   })),
+  getGitLabReviewVersionCompare: vi.fn(async () => {
+    throw new Error('Unexpected GitLab version compare.');
+  }),
+  getGitLabReviewVersions: vi.fn(async () => []),
+  getGitLabReviewVersionUnitDiff: vi.fn(async () => []),
   getLaunchOptions: vi.fn(async () => ({
     repositoryPathProvided: true,
     walkthrough: false,
@@ -206,6 +215,12 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
     root: '/repo',
   })),
   getRepositoryState: vi.fn(async () => repositoryState),
+  getReviewVersionCompare: vi.fn(async () => {
+    throw new Error('Unexpected review version compare.');
+  }),
+  getReviewVersions: vi.fn(async () => ({ versions: [], warning: null })),
+  getReviewVersionUnitDiff: vi.fn(async () => []),
+  getStoredReviewWalkthrough: vi.fn(async () => ({ status: 'missing' as const })),
   getTerminalHelperStatus: vi.fn(async () => ({
     command: 'codiff',
     installed: true,
@@ -411,7 +426,7 @@ test('stale persisted collapsed sidebar state does not hide the sidebar on launc
       false,
     );
     expect(app.container.querySelector('.sidebar')).not.toBeNull();
-    expect(app.container.querySelector('.sidebar [role="tablist"]')).toBeNull();
+    expect(app.container.querySelector('.sidebar [role="tablist"]')).not.toBeNull();
   });
 
   const topBar = app.container.querySelector('.review-top-bar');
@@ -735,8 +750,8 @@ test('branch history keeps branch diff available after selecting uncommitted cha
 
     await waitFor(() => {
       expect(container.querySelector('.loading')).toBeNull();
-      expect(findButton('Committed only vs main')).toBeTruthy();
-      expect(findButton('All changes vs main')).toBeTruthy();
+      expect(findButton('Uncommitted changes')).toBeTruthy();
+      expect(findButton('Branch diff vs main')).toBeTruthy();
     });
 
     await act(async () => {
@@ -745,11 +760,11 @@ test('branch history keeps branch diff available after selecting uncommitted cha
 
     await waitFor(() => {
       expect(getRepositoryState).toHaveBeenCalledWith({ type: 'working-tree' });
-      expect(findButton('Committed only vs main')).toBeTruthy();
+      expect(findButton('Branch diff vs main')).toBeTruthy();
     });
 
     await act(async () => {
-      findButton('Committed only vs main')?.click();
+      findButton('Branch diff vs main')?.click();
     });
 
     await waitFor(() => {
@@ -813,7 +828,7 @@ test('repository reload restores branch diff scope after selecting uncommitted c
 
     await waitFor(() => {
       expect(container.querySelector('.loading')).toBeNull();
-      expect(findButton('Committed only vs main')).toBeTruthy();
+      expect(findButton('Branch diff vs main')).toBeTruthy();
     });
     expect(getRepositoryState).toHaveBeenCalledWith({ type: 'working-tree' });
     expect(getRepositoryHistory).toHaveBeenCalledWith(expect.any(Number), branchSource);
@@ -2909,11 +2924,11 @@ test('refreshing all changes re-resolves the branch snapshot', async () => {
       findButton('History')?.click();
     });
     await waitFor(() => {
-      expect(findButton('Committed only vs main')).toBeTruthy();
+      expect(findButton('Branch diff vs main')).toBeTruthy();
     });
 
     await act(async () => {
-      findButton('Committed only vs main')?.click();
+      findButton('Branch diff vs main')?.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 

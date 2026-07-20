@@ -8,21 +8,26 @@ import { expect, test } from 'vite-plus/test';
 import { removeGitTestDirectory } from '../../core/__tests__/helpers/git.ts';
 
 const require = createRequire(import.meta.url);
-const { submitPullRequestReview } = require('../git-state/pull-request.cjs') as {
-  submitPullRequestReview: (
-    launchPath: string,
-    request: {
-      body?: string;
-      comments: ReadonlyArray<Record<string, unknown>>;
-      event: 'APPROVE' | 'COMMENT' | 'REQUEST_CHANGES';
-      source: {
-        provider: 'github';
-        type: 'pull-request';
-        url: string;
-      };
-    },
-  ) => Promise<void>;
-};
+const { readPullRequestDiff, submitPullRequestReview } =
+  require('../git-state/pull-request.cjs') as {
+    readPullRequestDiff: (
+      repoRoot: string,
+      pullRequest: { number: number; owner: string; repo: string; url: string },
+    ) => Promise<string>;
+    submitPullRequestReview: (
+      launchPath: string,
+      request: {
+        body?: string;
+        comments: ReadonlyArray<Record<string, unknown>>;
+        event: 'APPROVE' | 'COMMENT' | 'REQUEST_CHANGES';
+        source: {
+          provider: 'github';
+          type: 'pull-request';
+          url: string;
+        };
+      },
+    ) => Promise<void>;
+  };
 
 const execFileAsync = promisify(execFile);
 
@@ -151,6 +156,42 @@ process.stdin.on('end', () => {
       delete process.env.CODIFF_GITHUB_REVIEW_TEST_CALLS;
     } else {
       process.env.CODIFF_GITHUB_REVIEW_TEST_CALLS = previousCallsPath;
+    }
+    await removeGitTestDirectory(directory);
+  }
+});
+
+test('falls back to per-file patches when GitHub rejects an oversized aggregate diff', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codiff-pull-request-diff-'));
+  const fakeBin = join(directory, 'bin');
+  const fakeGh = join(fakeBin, 'gh');
+  const previousPath = process.env.PATH;
+
+  try {
+    await mkdir(fakeBin);
+    await writeFile(
+      fakeGh,
+      `#!/usr/bin/env node
+process.stderr.write('gh: Sorry, the diff exceeded the maximum number of lines (20000) (HTTP 406) when trying to use this endpoint.\\n');
+process.exit(1);
+`,
+    );
+    await chmod(fakeGh, 0o755);
+    process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
+
+    await expect(
+      readPullRequestDiff(directory, {
+        number: 12,
+        owner: 'nkzw-tech',
+        repo: 'codiff',
+        url: 'https://github.com/nkzw-tech/codiff/pull/12',
+      }),
+    ).resolves.toBe('');
+  } finally {
+    if (previousPath == null) {
+      delete process.env.PATH;
+    } else {
+      process.env.PATH = previousPath;
     }
     await removeGitTestDirectory(directory);
   }

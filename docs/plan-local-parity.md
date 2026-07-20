@@ -304,7 +304,7 @@ Package shape preference:
 ```
 
 If packaging slows the first landing, start under
-`electron/git-state/github-history/` with the same public interface and move it
+Landed as `@nkzw/codiff-github` (transport + pure history). Electron keeps `gh`/`git` hosts via `electron/git-state/github-history/` and `electron/github-history-bridge.cjs`. Originally planned as temporary landing under `electron/git-state/github-history/` with the same public interface and move it
 into a package in the release commit.
 
 Acceptance:
@@ -322,29 +322,64 @@ Tests:
 
 ### 4. Shared generation orchestration helper
 
-Avoid two host-specific generators.
+Avoid two host-specific generators. This step is the contract that keeps Local
+and Web from forking walkthrough semantics.
 
-Work:
+#### Why this exists
 
-- add a small host-agnostic helper in Core or a local shared module:
+Walkthrough generation has three layers:
+
+1. **Plan** — whole-diff vs units (from evolution recommendation or user override)
+2. **Authoring** — prompt build, draft parse/normalize, unit composition
+   (`walkthrough-authoring`)
+3. **Runtime** — model IDs, process/Think transport, retries, cache, fanout
+
+Hosts must own (3). They must **not** reimplement (1) or (2). The shared helper
+is the single entry for (1)+(2) with a host-injected `runModel` for (3).
+
+#### API
 
 ```ts
 generateReviewWalkthrough({
-  plan,
-  states, // whole or per-unit
-  runModel, // host-provided
   agent,
-  compose,
-});
+  plan?,              // optional; resolved from evolution+structure when omitted
+  evolution?,         // Core ReviewCommitEvolution for unit plans
+  structure?,         // auto | whole-diff | units | commit-by-commit
+  states: {
+    whole?,           // required for whole-diff and for composition parent
+    byUnitId?,        // ReviewUnit.id -> RepositoryState
+  },
+  promptOptions?,     // versionCompareRange, versionCommitContext, etc.
+  runModel,           // host-provided async ({agent, prompt, state}) => {draft}
+})
 ```
 
-- local agents implement `runModel`
-- Web Think path can adopt later
+Behavior:
+
+- **whole-diff:** one `buildWalkthroughPrompt` + `runModel` + `normalizeWalkthroughDraft`
+- **units:** for each reviewable unit with a state, independent prompt/run/normalize,
+  then `composeUnitWalkthroughs`
+- missing unit states are skipped and reported; all-fail => `status: 'failed'`
+
+#### Local wiring
+
+- IPC `generateReviewWalkthrough` materializes whole/unit `RepositoryState`s
+  (baseline PR state or version-compare files + per-unit diffs)
+- `runModel` shells to the window agent (codex/claude/opencode/pi) with the
+  narrative response schema
+- GitLab and GitHub hosts both call the same IPC → same Core helper
+
+#### Web adoption (later)
+
+- Worker/Think implements `runModel`
+- DO fanout may prebuild `byUnitId` states and still call this helper
+- D1/R2 cache keys stay host-side; helper remains pure orchestration
 
 Acceptance:
 
 - local GitLab and GitHub both call the same orchestration helper
 - composition and prompt options remain in `walkthrough-authoring`
+- no provider-specific prompt forks in Electron
 
 ### 5. UX polish and parity gaps
 

@@ -341,9 +341,7 @@ const getGitIdentityDisplayName = (identity: GitIdentity | null) =>
   identity?.name || identity?.email || 'Git user';
 
 function ReviewAvatar({ author }: { author: PullRequestExistingReviewComment['author'] }) {
-  return (
-    <Avatar name={getReviewAuthorDisplayName(author)} size="medium" url={author.avatarUrl} />
-  );
+  return <Avatar name={getReviewAuthorDisplayName(author)} size="medium" url={author.avatarUrl} />;
 }
 
 function IdentityReviewAvatar({ identity }: { identity: GitIdentity | null }) {
@@ -821,9 +819,7 @@ function SourceDescriptionBody({
         author ? '' : ' source-description-comment-anonymous'
       }`}
     >
-      {author ? (
-        <Avatar name={author.displayName} size="medium" url={author.avatarUrl} />
-      ) : null}
+      {author ? <Avatar name={author.displayName} size="medium" url={author.avatarUrl} /> : null}
       <div className="review-comment-body source-description-body">
         {author || canEditDescription || editing ? (
           <div
@@ -1281,6 +1277,7 @@ function ImageDiffPreview({
 function ReviewCommentEditor({
   agentId,
   agentLabel,
+  canSubmitReviewComments,
   comment,
   displayName,
   focusCommentId,
@@ -1300,6 +1297,7 @@ function ReviewCommentEditor({
 }: {
   agentId: 'codex' | 'claude' | 'opencode' | 'pi';
   agentLabel: string;
+  canSubmitReviewComments: boolean;
   comment: ReviewComment;
   displayName: string;
   focusCommentId: string | null;
@@ -1371,7 +1369,7 @@ function ReviewCommentEditor({
 
   const draftComment = withCommentBody(comment, draft);
   const canAskCodex = onAskCodex != null && canAskCodexForComment(draftComment);
-  const commentCanSubmit = canSubmitComment(draftComment);
+  const commentCanSubmit = canSubmitReviewComments && canSubmitComment(draftComment);
   const canEditExistingComment = isPullRequest && comment.isReadOnly && comment.canEdit === true;
   const canSaveEdit =
     canEditExistingComment &&
@@ -1559,14 +1557,14 @@ function ReviewCommentEditor({
   const handleKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLDivElement>) => {
       if (matchesShortcut(event, keymap, 'submitComment')) {
-        if (isPullRequest && commentCanSubmit) {
+        if (canSubmitReviewComments && commentCanSubmit) {
           event.preventDefault();
           event.stopPropagation();
           handleSubmitComment();
           return;
         }
 
-        if (!isPullRequest && canAskCodex) {
+        if (!canSubmitReviewComments && canAskCodex) {
           event.preventDefault();
           event.stopPropagation();
           handleAskCodex();
@@ -1591,13 +1589,13 @@ function ReviewCommentEditor({
     },
     [
       canAskCodex,
+      canSubmitReviewComments,
       commentCanSubmit,
       comment.id,
       comment.isReadOnly,
       draft,
       handleAskCodex,
       handleSubmitComment,
-      isPullRequest,
       keymap,
       onDeleteComment,
     ],
@@ -1628,7 +1626,7 @@ function ReviewCommentEditor({
         <div className="review-comment-body">
           <div
             className={`review-comment-header${
-              (isPullRequest && !comment.isReadOnly) ||
+              (canSubmitReviewComments && !comment.isReadOnly) ||
               canEditExistingComment ||
               comment.canDelete ||
               editingExistingComment
@@ -1698,7 +1696,7 @@ function ReviewCommentEditor({
                 Ask
               </button>
             ) : null}
-            {isPullRequest && !comment.isReadOnly ? (
+            {canSubmitReviewComments && !comment.isReadOnly ? (
               <button
                 className="review-comment-action"
                 disabled={!commentCanSubmit}
@@ -1840,7 +1838,6 @@ function ReviewCommentEditor({
                   ariaLabel={`${agentLabel} reply`}
                   className="review-comment-codex-reply-markdown"
                   density="compact"
-                  onHeightChange={handleHeightChange}
                   value={comment.codexReply.body ?? comment.codexReply.error ?? ''}
                   variant="embedded"
                 />
@@ -1884,6 +1881,7 @@ const noopLayoutReady = () => {};
 function ReviewCommentThreadGroup({
   agentId,
   agentLabel,
+  canSubmitReviewComments,
   comments,
   focusCommentId,
   focusEditorRef,
@@ -1904,6 +1902,7 @@ function ReviewCommentThreadGroup({
 }: {
   agentId: 'codex' | 'claude' | 'opencode' | 'pi';
   agentLabel: string;
+  canSubmitReviewComments: boolean;
   comments: ReadonlyArray<ReviewComment>;
   focusCommentId: string | null;
   focusEditorRef: (node: MarkdownEditorHandle | null) => void;
@@ -1979,6 +1978,7 @@ function ReviewCommentThreadGroup({
           <ReviewCommentEditor
             agentId={agentId}
             agentLabel={agentLabel}
+            canSubmitReviewComments={canSubmitReviewComments}
             comment={comment}
             displayName={displayName}
             focusCommentId={focusCommentId}
@@ -2031,11 +2031,13 @@ function ReviewAnnotation({
   agentId,
   agentLabel,
   annotation,
+  canSubmitReviewComments,
   comments,
   focusCommentId,
   focusCommentRequest,
   identity,
   isPullRequest,
+  itemId,
   keymap,
   onAskCodex,
   onCommentBlur,
@@ -2052,18 +2054,20 @@ function ReviewAnnotation({
   agentId: 'codex' | 'claude' | 'opencode' | 'pi';
   agentLabel: string;
   annotation: DiffLineAnnotation<ReviewCommentAnnotationMetadata>;
+  canSubmitReviewComments: boolean;
   comments: ReadonlyArray<ReviewComment>;
   focusCommentId: string | null;
   focusCommentRequest: number;
   identity: GitIdentity | null;
   isPullRequest: boolean;
+  itemId: string;
   keymap: CodiffKeymap;
   onAskCodex?: (commentId: string) => void;
   onCommentBlur: (comment: ReviewComment, body: string) => void;
   onCommentDraftChange?: (comment: Pick<ReviewComment, 'body' | 'id'> | null) => void;
   onCommentFocus: (comment: ReviewComment) => void;
   onDeleteComment: (commentId: string) => void;
-  onHeightChange: () => void;
+  onHeightChange: (itemId: string) => void;
   onReplyToThread: (threadId: string, comment: ReviewComment) => void;
   onResolveThread?: (threadId: string, resolved: boolean) => Promise<void> | void;
   onSaveCommentEdit: (commentId: string, body: string) => Promise<void> | void;
@@ -2074,6 +2078,7 @@ function ReviewAnnotation({
   const setFocusEditorRef = useCallback((node: MarkdownEditorHandle | null) => {
     focusEditorRef.current = node;
   }, []);
+  const handleHeightChange = useCallback(() => onHeightChange(itemId), [itemId, onHeightChange]);
   const annotationComments = annotation.metadata.commentIds
     .map((commentId) => comments.find((comment) => comment.id === commentId))
     .filter((comment): comment is ReviewComment => comment != null);
@@ -2097,6 +2102,7 @@ function ReviewAnnotation({
         <ReviewCommentThreadGroup
           agentId={agentId}
           agentLabel={agentLabel}
+          canSubmitReviewComments={canSubmitReviewComments}
           comments={group.comments}
           focusCommentId={focusCommentId}
           focusEditorRef={setFocusEditorRef}
@@ -2109,7 +2115,7 @@ function ReviewAnnotation({
           onCommentDraftChange={onCommentDraftChange}
           onCommentFocus={onCommentFocus}
           onDeleteComment={onDeleteComment}
-          onHeightChange={onHeightChange}
+          onHeightChange={handleHeightChange}
           onReplyToThread={onReplyToThread}
           onResolveThread={onResolveThread}
           onSaveCommentEdit={onSaveCommentEdit}
@@ -2461,6 +2467,7 @@ export function ReviewCodeView({
   allowViewedToggle = false,
   blocks,
   bottomInset = codeViewLayout.paddingBottom,
+  canSubmitReviewComments = false,
   codeQualityFindings = [],
   collapsed,
   comments,
@@ -2522,6 +2529,7 @@ export function ReviewCodeView({
   allowViewedToggle?: boolean;
   blocks?: ReadonlyArray<ReviewDiffBlock>;
   bottomInset?: number;
+  canSubmitReviewComments?: boolean;
   codeQualityFindings?: ReadonlyArray<PullRequestCodeQualityFinding>;
   collapsed: ReadonlySet<string>;
   comments: ReadonlyArray<ReviewComment>;
@@ -2593,10 +2601,12 @@ export function ReviewCodeView({
       : (blocks?.map((block) => block.file).filter((file): file is ChangedFile => file != null) ??
         []);
   const initialEditableMarkdownSections =
-    !isReadOnly && source.type === 'working-tree'
+    !isReadOnly && (source.type === 'working-tree' || source.type === 'branch-working-tree')
       ? initialMarkdownFiles.flatMap((file) => {
           const section = file.sections.at(-1);
-          return file.status !== 'deleted' && isMarkdownFilePath(file.path) && section
+          return file.status !== 'deleted' &&
+            isMarkdownFilePath(file.path) &&
+            section?.kind === 'unstaged'
             ? [section.id]
             : [];
         })
@@ -2792,8 +2802,9 @@ export function ReviewCodeView({
         const canEditMarkdown =
           canRenderMarkdown &&
           !isReadOnly &&
-          source.type === 'working-tree' &&
+          (source.type === 'working-tree' || source.type === 'branch-working-tree') &&
           file.status !== 'deleted' &&
+          section.kind === 'unstaged' &&
           file.sections.at(-1)?.id === section.id;
         const isMarkdownPreview = canRenderMarkdown && markdownPreviewSections.has(section.id);
         const isSelected = block.fileSelected ?? block.selected ?? selectedPath === file.path;
@@ -3384,7 +3395,7 @@ export function ReviewCodeView({
       clearCommentLineHighlight();
       if (
         markdownPreviewSections.has(section.id) &&
-        source.type === 'working-tree' &&
+        (source.type === 'working-tree' || source.type === 'branch-working-tree') &&
         file.status !== 'deleted'
       ) {
         if (refreshingMarkdownSectionsRef.current.has(section.id)) {
@@ -3977,18 +3988,20 @@ export function ReviewCodeView({
           agentId={agentId}
           agentLabel={agentLabel}
           annotation={annotation as DiffLineAnnotation<ReviewCommentAnnotationMetadata>}
+          canSubmitReviewComments={canSubmitReviewComments}
           comments={renderComments}
           focusCommentId={focusCommentId}
           focusCommentRequest={focusCommentRequest}
           identity={gitIdentity}
           isPullRequest={isPullRequest}
+          itemId={item.id}
           keymap={keymap}
           onAskCodex={onAskCodex}
           onCommentBlur={blurComment}
           onCommentDraftChange={onCommentDraftChange}
           onCommentFocus={focusComment}
           onDeleteComment={deleteComment}
-          onHeightChange={() => markCommentLayoutChanged(item.id)}
+          onHeightChange={markCommentLayoutChanged}
           onReplyToThread={replyToThread}
           onResolveThread={onResolveThread}
           onSaveCommentEdit={onSaveCommentEdit}
@@ -4001,6 +4014,7 @@ export function ReviewCodeView({
       agentId,
       agentLabel,
       blurComment,
+      canSubmitReviewComments,
       deleteComment,
       focusCommentId,
       focusCommentRequest,

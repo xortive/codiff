@@ -112,6 +112,21 @@ export type {
   WalkthroughHunk,
 } from './types.ts';
 export {
+  classifyGitLabCommit,
+  classifyMergeRequestReviewStrategy,
+  classifyReviewCommit,
+  classifyReviewStrategy,
+  orderCommitsTopologically,
+  overrideMergeRequestReviewStrategy,
+  reviewStructureFromStrategy,
+  versionCompareReviewStructureKey,
+  type ClassifiedCommit,
+  type ClassifiedCommitRole,
+  type GitLabMergeRequestCommitLike,
+  type MergeRequestReviewStrategy,
+  type ReviewStrategyCommitLike,
+} from './lib/review-strategy.ts';
+export {
   formatVersionElapsedDuration,
   MergeRequestReviewApp,
   ReadOnlyGeneralCommentCard,

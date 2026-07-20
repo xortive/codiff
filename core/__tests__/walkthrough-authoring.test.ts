@@ -215,7 +215,7 @@ test('includes version-commit guidance and composes unit walkthroughs', () => {
     versionCommitContext: {
       after: { shortSha: 'bbbbbbb', subject: 'Later' },
       before: { shortSha: 'aaaaaaa', subject: 'Earlier' },
-      evolutionKind: 'revised',
+      evolutionKind: 'likely-revised',
       kind: 'version-commit',
       range: { fromLabel: 'v1', toLabel: 'v2' },
       unitId: 'unit-1',
@@ -287,7 +287,7 @@ test('scopes version-comparison Review focus to changes since the earlier versio
     entries: [
       {
         context: {
-          after: { shortSha: 'bbbbbbb', subject: 'Later' },
+          after: { sha: 'b'.repeat(40), shortSha: 'bbbbbbb', subject: 'Later' },
           evolutionKind: 'added',
           kind: 'version-commit',
           range: { fromLabel: 'v1', toLabel: 'v2' },

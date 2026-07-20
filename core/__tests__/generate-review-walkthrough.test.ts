@@ -177,6 +177,48 @@ test('generateReviewWalkthrough units path fans out and composes', async () => {
   );
 });
 
+test('generateReviewWalkthrough authors ordinary commit units with commit context', async () => {
+  const commitUnit = {
+    commit: {
+      authoredAt: '2026-01-01T00:00:00.000Z',
+      authorName: 'Ada',
+      parentIds: ['0'.repeat(40)],
+      sha: 'a'.repeat(40),
+      shortSha: 'aaaaaaa',
+      subject: 'Add the request path',
+    },
+    id: `commit:${'a'.repeat(40)}`,
+    kind: 'commit' as const,
+    order: 0,
+    reviewable: true as const,
+  };
+  const prompts: Array<string> = [];
+  const result = await generateReviewWalkthrough({
+    agent: 'codex',
+    plan: { structure: 'units', units: [commitUnit] },
+    runModel: async ({ prompt }) => {
+      prompts.push(prompt);
+      return { draft };
+    },
+    states: {
+      byUnitId: { [commitUnit.id]: baseState },
+      whole: baseState,
+    },
+  });
+
+  expect(result.status).toBe('ready');
+  if (result.status !== 'ready') {
+    return;
+  }
+  expect(prompts[0]).toContain('This is an independent walkthrough for commit');
+  expect(prompts[0]).not.toContain('version comparison');
+  expect(result.walkthrough.chapters[0]?.commit).toMatchObject({
+    gitSha: commitUnit.commit.sha,
+    sha: commitUnit.commit.sha,
+  });
+  expect(result.walkthrough.commitFiles).toEqual(baseState.files);
+});
+
 test('generateReviewWalkthrough fails clearly without whole state', async () => {
   const result = await generateReviewWalkthrough({
     agent: 'codex',

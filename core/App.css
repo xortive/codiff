@@ -1317,6 +1317,13 @@ html[data-codiff-platform='darwin'] .sidebar {
   width: 100%;
 }
 
+.version-picker-trigger > *:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .version-picker-positioner {
   /* Base UI renders this in a portal, outside the sidebar's clipping context. */
   z-index: 1000;
@@ -1379,7 +1386,9 @@ html[data-codiff-platform='darwin'] .sidebar {
   min-height: 24px;
 }
 
-.version-comparison-status.error { color: var(--danger); }
+.version-comparison-status.error {
+  color: var(--danger);
+}
 
 .version-comparison-spinner {
   animation: version-comparison-spin 0.8s linear infinite;
@@ -1390,12 +1399,25 @@ html[data-codiff-platform='darwin'] .sidebar {
   width: 12px;
 }
 
-@keyframes version-comparison-spin { to { transform: rotate(360deg); } }
+@keyframes version-comparison-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
-.version-picker-head { color: var(--accent, var(--sidebar-text)); font-weight: 700; }
-.version-picker-additions { color: var(--diff-addition); }
-.version-picker-deletions { color: var(--diff-deletion); }
-.version-picker-timing { color: var(--muted); }
+.version-picker-head {
+  color: var(--accent, var(--sidebar-text));
+  font-weight: 700;
+}
+.version-picker-additions {
+  color: var(--diff-addition);
+}
+.version-picker-deletions {
+  color: var(--diff-deletion);
+}
+.version-picker-timing {
+  color: var(--muted);
+}
 
 .version-base-movement,
 .version-commit-evolution,
@@ -1409,18 +1431,28 @@ html[data-codiff-platform='darwin'] .sidebar {
   padding: 7px;
 }
 
-.version-base-movement a { color: inherit; font-family: var(--font-mono); }
+.version-base-movement a {
+  color: inherit;
+  font-family: var(--font-mono);
+}
 .version-base-movement-stat,
 .version-base-movement small,
 .version-commit-evolution small,
-.version-walkthrough-structure small { color: var(--muted); }
+.version-walkthrough-structure small {
+  color: var(--muted);
+}
 .version-base-movement-stat {
   font: 11px/1.45 var(--font-sans);
   letter-spacing: 0;
   text-transform: none;
 }
-.version-base-movement small { display: block; margin-top: 3px; }
-.version-base-movement-commits { margin-top: 6px; }
+.version-base-movement small {
+  display: block;
+  margin-top: 3px;
+}
+.version-base-movement-commits {
+  margin-top: 6px;
+}
 .version-base-movement-commits > summary {
   color: var(--muted);
   cursor: pointer;
@@ -1430,14 +1462,18 @@ html[data-codiff-platform='darwin'] .sidebar {
   text-transform: none;
   user-select: none;
 }
-.version-base-movement-commits > summary::-webkit-details-marker { display: none; }
+.version-base-movement-commits > summary::-webkit-details-marker {
+  display: none;
+}
 .version-base-movement-commits > summary::before {
   content: '▸';
   display: inline-block;
   margin-right: 4px;
   transition: transform 0.12s ease;
 }
-.version-base-movement-commits[open] > summary::before { transform: rotate(90deg); }
+.version-base-movement-commits[open] > summary::before {
+  transform: rotate(90deg);
+}
 .version-base-movement-commit-list {
   margin-top: 5px;
   max-height: 220px;
@@ -1456,9 +1492,15 @@ html[data-codiff-platform='darwin'] .sidebar {
 .version-base-movement-commit:hover {
   background: rgb(127 127 127 / 0.14);
 }
-.version-commit-evolution > strong { display: block; margin-bottom: 4px; }
+.version-commit-evolution > strong {
+  display: block;
+  margin-bottom: 4px;
+}
 
-.version-commit-evolution-list { display: grid; gap: 1px; }
+.version-commit-evolution-list {
+  display: grid;
+  gap: 1px;
+}
 .version-commit-unit {
   align-items: center;
   background: transparent;
@@ -1469,17 +1511,32 @@ html[data-codiff-platform='darwin'] .sidebar {
   display: grid;
   font: 10px/1.35 var(--font-sans);
   gap: 5px;
-  grid-template-columns: 12px auto minmax(0, 1fr);
+  grid-template-columns: max-content max-content minmax(0, 1fr);
   padding: 4px;
   text-align: left;
 }
-.version-commit-unit:disabled { cursor: default; }
+.version-commit-unit:disabled {
+  cursor: default;
+}
 .version-commit-unit:not(:disabled):hover,
-.version-commit-unit[aria-pressed='true'] { background: rgb(127 127 127 / 0.14); }
-.version-commit-unit code { font-size: 9px; white-space: nowrap; }
-.version-commit-unit > span:nth-child(3) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.version-commit-unit.unchanged { opacity: 0.5; }
-.version-commit-unit.unchanged:not(:disabled):hover { opacity: 0.8; }
+.version-commit-unit[aria-pressed='true'] {
+  background: rgb(127 127 127 / 0.14);
+}
+.version-commit-unit code {
+  font-size: 9px;
+  white-space: nowrap;
+}
+.version-commit-unit > span:nth-child(3) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.version-commit-unit.unchanged {
+  opacity: 0.5;
+}
+.version-commit-unit.unchanged:not(:disabled):hover {
+  opacity: 0.8;
+}
 .version-commit-kind-pill {
   align-items: center;
   background: color-mix(in srgb, currentColor 12%, transparent);
@@ -1511,7 +1568,10 @@ html[data-codiff-platform='darwin'] .sidebar {
 .version-commit-kind-pill.unchanged {
   color: var(--muted);
 }
-.version-commit-unit-block { display: grid; gap: 1px; }
+.version-commit-unit-block {
+  display: grid;
+  gap: 1px;
+}
 .version-commit-rebase-drivers {
   display: grid;
   gap: 1px;
@@ -1528,9 +1588,18 @@ html[data-codiff-platform='darwin'] .sidebar {
   opacity: 0.88;
 }
 
-
-.version-unit-scope { align-items: center; display: flex; justify-content: space-between; }
-.version-unit-scope button { background: transparent; border: 0; color: var(--accent, var(--sidebar-text)); cursor: pointer; font-size: 10px; }
+.version-unit-scope {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+.version-unit-scope button {
+  background: transparent;
+  border: 0;
+  color: var(--accent, var(--sidebar-text));
+  cursor: pointer;
+  font-size: 10px;
+}
 .version-tree-commit-scope {
   border-bottom: 1px solid var(--sidebar-border);
   display: grid;
@@ -1594,17 +1663,35 @@ html[data-codiff-platform='darwin'] .sidebar {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.version-walkthrough-structure { display: grid; gap: 5px; margin-bottom: 10px; }
-.version-walkthrough-structure label { align-items: center; display: flex; gap: 5px; }
-.version-walkthrough-structure .sidebar-version-compare-button { margin-top: 3px; }
+.version-walkthrough-structure {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+.version-walkthrough-structure label {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+}
+.version-walkthrough-structure .sidebar-version-compare-button {
+  margin-top: 3px;
+}
 
 @media (max-width: 480px) {
-  .version-picker-popover { min-width: calc(100vw - 24px); }
-  .version-picker-option { gap: 3px; grid-template-columns: 29px 31px minmax(44px, 1fr) auto auto auto 24px; }
+  .version-picker-popover {
+    min-width: calc(100vw - 24px);
+  }
+  .version-picker-option {
+    gap: 3px;
+    grid-template-columns: 29px 31px minmax(44px, 1fr) auto auto auto 24px;
+  }
   .version-picker-option {
     grid-template-columns: 29px 31px minmax(44px, 1fr) auto auto auto;
   }
-  .version-picker-timing { grid-column: 1 / -1; padding-left: 60px; }
+  .version-picker-timing {
+    grid-column: 1 / -1;
+    padding-left: 60px;
+  }
 }
 .sidebar-diff-scope-header {
   align-items: center;
@@ -2248,6 +2335,46 @@ html[data-codiff-platform='darwin'] .sidebar {
 .sidebar-walkthrough-status-shell .sidebar-walkthrough-status {
   border-bottom: 0;
   width: 100%;
+}
+
+.sidebar-walkthrough-status-stack {
+  display: grid;
+  min-width: 0;
+  width: 100%;
+}
+
+.walkthrough-generation-structure {
+  border-bottom: 1px solid var(--sidebar-border);
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 8px 12px;
+}
+
+.walkthrough-generation-structure strong,
+.walkthrough-generation-structure small {
+  overflow-wrap: anywhere;
+}
+
+.walkthrough-generation-structure strong {
+  color: var(--sidebar-text);
+  font: 700 11px/1.35 var(--font-sans);
+}
+
+.walkthrough-generation-structure small {
+  color: var(--muted);
+  font: 10px/1.35 var(--font-mono);
+}
+
+.walkthrough-generation-structure button {
+  background: transparent;
+  border: 0;
+  color: var(--accent, var(--sidebar-text));
+  cursor: pointer;
+  font: 11px/1.35 var(--font-sans);
+  justify-self: start;
+  padding: 0;
+  text-align: left;
 }
 
 .sidebar-walkthrough-status {
@@ -5203,6 +5330,31 @@ diffs-container .review-comment-thread {
 }
 
 @container sidebar (max-width: 260px) {
+  .version-comparison-header {
+    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .diff-scope-control {
+    width: 100%;
+  }
+
+  .version-picker-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .version-comparison-endpoint {
+    flex-wrap: wrap;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .version-unit-scope {
+    align-items: flex-start;
+    display: grid;
+    gap: 4px;
+  }
+
   .sidebar-mode-toggle {
     gap: 4px;
     grid-template-columns: minmax(42px, 0.75fr) minmax(82px, 1.35fr) minmax(58px, 0.9fr);
@@ -5225,7 +5377,6 @@ diffs-container .review-comment-thread {
   }
 }
 
-
 .walkthrough-regenerate-controls {
   align-items: stretch !important;
   display: grid !important;
@@ -5245,7 +5396,6 @@ diffs-container .review-comment-thread {
   padding: 0 8px;
   width: 100%;
 }
-
 
 .walkthrough-structure-controls {
   align-items: stretch !important;

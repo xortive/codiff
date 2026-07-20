@@ -68,6 +68,8 @@ export type GitHubHistoryGit = {
   ensureCommit(sha: string): Promise<string>;
   /** True when `ancestor` is an ancestor of `descendant` (inclusive). */
   isAncestor(ancestor: string, descendant: string): Promise<boolean>;
+  /** Merge base of two commits, used to recover each historical head's effective target base. */
+  mergeBase(left: string, right: string): Promise<string>;
   /** Per-commit patch files for signature-based evolution (required). */
   readCommitDiff(sha: string): Promise<ReadonlyArray<ChangedFile>>;
   /** Metadata for a single commit object. */
@@ -218,9 +220,11 @@ export const readForcePushTimeline = async ({
  * Labels intentionally avoid GitLab v1/v2 numbering.
  */
 export const listGitHubReviewVersions = async ({
+  git,
   pull,
   transport,
 }: {
+  git?: GitHubHistoryGit;
   pull: GitHubPullRequestRef;
   transport: GitHubTransport;
 }): Promise<{
@@ -231,8 +235,6 @@ export const listGitHubReviewVersions = async ({
     pull,
     transport,
   });
-  const baseSha = currentBase || 'unknown-base';
-
   const heads: Array<{ createdAt: string; label: string; sha: string }> = [];
   const seen = new Set<string>();
 
@@ -281,8 +283,23 @@ export const listGitHubReviewVersions = async ({
     };
   }
 
-  const versions = heads.map((head, index) =>
-    reviewVersionOption({
+  const bases = await Promise.all(
+    heads.map(async (head) => {
+      if (!currentBase || !git) {
+        return currentBase || 'unknown-base';
+      }
+      try {
+        await Promise.all([git.ensureCommit(currentBase), git.ensureCommit(head.sha)]);
+        return await git.mergeBase(currentBase, head.sha);
+      } catch {
+        return currentBase;
+      }
+    }),
+  );
+
+  const versions = heads.map((head, index) => {
+    const baseSha = bases[index]!;
+    return reviewVersionOption({
       createdAt: head.createdAt,
       id: head.sha,
       isHead: index === heads.length - 1,
@@ -297,8 +314,8 @@ export const listGitHubReviewVersions = async ({
             previousNumber: index,
           }
         : {}),
-    }),
-  );
+    });
+  });
 
   return { versions, warning };
 };
@@ -614,15 +631,7 @@ export const compareGitHubReviewVersions = async ({
     }
   }
 
-  let files: ReadonlyArray<ChangedFile>;
-  try {
-    files = await git.readRangeFiles(fromHead, toHead, true);
-  } catch {
-    files = await git.readRangeFiles(fromHead, toHead, false);
-    warnings.push(
-      'Symmetric (merge-base) compare failed; fell back to direct head-to-head patch compare.',
-    );
-  }
+  const files = await git.readRangeFiles(fromHead, toHead, false);
 
   const baseMoved = fromBase !== toBase && fromBase !== 'unknown-base' && toBase !== 'unknown-base';
   const lineStats = countPatchLines(files);
@@ -732,7 +741,7 @@ export const loadGitHubVersionCommitUnitDiff = async ({
     return git.readRangeFiles(unit.before.sha, parent, false);
   }
   if (unit.kind === 'revised' && unit.before && unit.after) {
-    return git.readRangeFiles(unit.before.sha, unit.after.sha, true);
+    return git.readRangeFiles(unit.before.sha, unit.after.sha, false);
   }
   throw new Error(`Unsupported evolution unit kind for diff loading: ${unit.kind}`);
 };

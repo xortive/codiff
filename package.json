@@ -48,6 +48,7 @@
     "test:integration": "vp run build && vp test -c vitest.cloudflare.config.ts"
   },
   "dependencies": {
+    "codiff": "link:",
     "electron-squirrel-startup": "^1.0.1",
     "node-pty": "^1.1.0",
     "proper-lockfile": "^4.1.2"

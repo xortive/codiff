@@ -23,10 +23,7 @@ import {
 } from 'react';
 import { Avatar } from './app/components/Avatar.tsx';
 import { Button } from './app/components/Button.tsx';
-import {
-  CommitRefTooltip,
-  versionCommitKindLabel,
-} from './app/components/CommitRefTooltip.tsx';
+import { CommitRefTooltip, versionCommitKindLabel } from './app/components/CommitRefTooltip.tsx';
 import { CommitScopePanel } from './app/components/CommitScopePanel.tsx';
 import {
   isTerminalPullRequestMergeState,
@@ -74,6 +71,10 @@ import {
 import { compactPath, fileTreeSort, fuzzyMatches, sortFiles, statusForTree } from './lib/files.ts';
 import { isNativeInputTarget } from './lib/keyboard.ts';
 import { isGeneratedWalkthroughFile } from './lib/narrative-walkthrough-diff.js';
+import {
+  combineWalkthroughCommitFiles,
+  getWalkthroughCommitDiffShas,
+} from './lib/narrative-walkthrough.ts';
 import {
   getCommentKey,
   getPendingPullRequestReviewComments,
@@ -253,6 +254,8 @@ export type MergeRequestReviewAppProps = {
       'codeFontFamily' | 'codeFontSize' | 'diffStyle' | 'showWhitespace' | 'theme' | 'wordWrap'
     >
   >;
+  /** Shown in external-link tooltips (for example GitLab or GitHub). */
+  providerLabel?: string;
   reviewStrategy?: MergeRequestReviewStrategySummary | null;
   selectedCommitSha?: string | null;
   settingsBar?: ReactNode;
@@ -268,13 +271,18 @@ export type MergeRequestReviewAppProps = {
   versionCompareFromId?: string | null;
   versionCompareLoading?: boolean;
   versionCompareToId?: string | null;
+  /** Sidebar history section title. GitLab: Versions; GitHub: Head history. */
+  versionHistoryLabel?: string;
   versionHistoryLoading?: boolean;
+  versionHistoryWarning?: string | null;
   versions?: ReadonlyArray<MergeRequestVersionOption>;
   versionWalkthroughStructure?: 'commit-by-commit' | 'whole-diff';
   walkthrough: NarrativeWalkthrough | null;
   walkthroughError?: string | null;
   walkthroughProgress?: WalkthroughGenerationProgress | null;
   walkthroughStatus: MergeRequestWalkthroughStatus;
+  /** Baseline scope label. GitLab: Whole MR; GitHub: Whole PR. */
+  wholeDiffLabel?: string;
 };
 
 const getCodeFontLineHeight = (size: number) => Math.round((size * 20) / 13);
@@ -1402,9 +1410,14 @@ export type ReviewSurfaceProps = {
   versionCompareFromId?: string | null;
   versionCompareLoading?: boolean;
   versionCompareToId?: string | null;
+  /** Sidebar history section title. GitLab: Versions; GitHub: Head history. */
+  versionHistoryLabel?: string;
   versionHistoryLoading?: boolean;
+  versionHistoryWarning?: string | null;
   versions?: ReadonlyArray<MergeRequestVersionOption>;
   versionWalkthroughStructure?: 'commit-by-commit' | 'whole-diff';
+  /** Baseline scope label. GitLab: Whole MR; GitHub: Whole PR. */
+  wholeDiffLabel?: string;
 };
 
 const shortRelativeTime = (value: string) => {
@@ -1756,9 +1769,12 @@ export function ReviewSurface({
   versionCompareFromId = null,
   versionCompareLoading = false,
   versionCompareToId = null,
+  versionHistoryLabel = 'Versions',
   versionHistoryLoading = false,
+  versionHistoryWarning = null,
   versions = [],
   versionWalkthroughStructure: versionWalkthroughStructureProp,
+  wholeDiffLabel = 'Whole MR',
 }: ReviewSurfaceProps) {
   const canComment = commenting?.canComment ?? Boolean(interactive);
   const deleteShare = useCallback(async () => {
@@ -1775,6 +1791,7 @@ export function ReviewSurface({
     }
   }, [onDeleteShare]);
   const submitReviewComment = commenting?.onSubmitComment ?? interactive?.onSubmitComment;
+  const canSubmitReviewComments = canComment && submitReviewComment != null;
   const submitGeneralDiscussion =
     commenting?.onSubmitGeneralComment ?? interactive?.onSubmitGeneralComment;
   const updateReviewComment = commenting?.onUpdateComment ?? interactive?.onUpdateComment;
@@ -1825,10 +1842,12 @@ export function ReviewSurface({
   const [versionSectionExpanded, setVersionSectionExpanded] = useState(true);
 
   useEffect(() => {
-    setSelectedVersionUnitIds(new Set());
-    setVersionUnitFiles({});
-    setVersionUnitLoadingIds(new Set());
-    setVersionUnitErrors({});
+    queueMicrotask(() => {
+      setSelectedVersionUnitIds(new Set());
+      setVersionUnitFiles({});
+      setVersionUnitLoadingIds(new Set());
+      setVersionUnitErrors({});
+    });
     versionUnitScopeRef.current += 1;
   }, [versionCompare?.from.id, versionCompare?.to.id]);
 
@@ -1837,10 +1856,14 @@ export function ReviewSurface({
       return;
     }
     if (versionWalkthroughStructureProp == null) {
-      setVersionWalkthroughStructureState(versionCommitEvolution.recommendation.suggestedStructure);
-      onVersionWalkthroughStructureChange?.(
-        versionCommitEvolution.recommendation.suggestedStructure,
-      );
+      queueMicrotask(() => {
+        setVersionWalkthroughStructureState(
+          versionCommitEvolution.recommendation.suggestedStructure,
+        );
+        onVersionWalkthroughStructureChange?.(
+          versionCommitEvolution.recommendation.suggestedStructure,
+        );
+      });
     }
   }, [
     onVersionWalkthroughStructureChange,
@@ -1941,25 +1964,51 @@ export function ReviewSurface({
   const [treeCommitDiffError, setTreeCommitDiffError] = useState<string | null>(null);
   const [treeCommitDiffLoading, setTreeCommitDiffLoading] = useState(false);
   const commitLoadRequestRef = useRef(0);
-  // CBC walkthroughs are authored against unit-scoped commitFiles. Whole-diff
-  // walkthroughs are authored against the aggregate version comparison.
+  const walkthroughCommitShas = useMemo(
+    () => getWalkthroughCommitDiffShas(sharedWalkthrough),
+    [sharedWalkthrough],
+  );
+  const isCommitByCommitWalkthrough = versionCompare
+    ? versionWalkthroughStructure === 'commit-by-commit'
+    : interactive?.reviewStrategy?.mode === 'commit-by-commit' ||
+      sharedWalkthrough.chapters.some((chapter) => chapter.commit != null);
+  const legacyWalkthroughNeedsCommitDiffs =
+    isCommitByCommitWalkthrough && sharedWalkthrough.commitFiles == null;
+  const missingWalkthroughCommitShas = useMemo(
+    () =>
+      legacyWalkthroughNeedsCommitDiffs
+        ? walkthroughCommitShas.filter((sha) => !commitFilesBySha[sha])
+        : [],
+    [commitFilesBySha, legacyWalkthroughNeedsCommitDiffs, walkthroughCommitShas],
+  );
+  // CBC walkthroughs are authored against the complete, unit-scoped
+  // commitFiles set. Legacy cached walkthroughs have no such set, so they
+  // remain empty until every chapter diff has loaded.
   const walkthroughFiles = useMemo(
     () =>
-      versionCompare
-        ? resolveVersionWalkthroughFiles({
-            commitFiles: sharedWalkthrough.commitFiles,
-            structure: versionWalkthroughStructure,
-            versionFiles: versionCompare.files,
-          })
-        : walkthroughCommitSha
-          ? (commitFilesBySha[walkthroughCommitSha] ?? [])
-          : [...snapshot.files, ...(sharedWalkthrough.commitFiles ?? [])],
+      legacyWalkthroughNeedsCommitDiffs
+        ? missingWalkthroughCommitShas.length === 0
+          ? combineWalkthroughCommitFiles(walkthroughCommitShas, commitFilesBySha)
+          : []
+        : versionCompare
+          ? resolveVersionWalkthroughFiles({
+              commitFiles: sharedWalkthrough.commitFiles,
+              structure: versionWalkthroughStructure,
+              versionFiles: versionCompare.files,
+            })
+          : isCommitByCommitWalkthrough
+            ? (sharedWalkthrough.commitFiles ?? [])
+            : [...snapshot.files, ...(sharedWalkthrough.commitFiles ?? [])],
     [
       commitFilesBySha,
+      isCommitByCommitWalkthrough,
+      legacyWalkthroughNeedsCommitDiffs,
+      missingWalkthroughCommitShas.length,
       sharedWalkthrough.commitFiles,
       snapshot.files,
       versionCompare,
-      walkthroughCommitSha,
+      versionWalkthroughStructure,
+      walkthroughCommitShas,
     ],
   );
   const navigation = useNarrativeNavigation(
@@ -2004,7 +2053,7 @@ export function ReviewSurface({
       const commitSha =
         chapter?.commit?.sha ??
         commits.find((commit) => chapter?.id.startsWith(`${commit.sha}:`))?.sha;
-      setWalkthroughCommitSha(commitSha ?? null);
+      queueMicrotask(() => setWalkthroughCommitSha(commitSha ?? null));
     }
   }, [
     navigation.index,
@@ -2026,6 +2075,14 @@ export function ReviewSurface({
       walkthroughStructure?: 'auto' | 'commit-by-commit' | 'whole-diff';
     };
   } | null>(null);
+  const queuedWalkthroughGenerationOptionsRef =
+    useRef<typeof walkthroughGenerationOptionsRef.current>(null);
+  const [queuedReviewStructure, setQueuedReviewStructure] = useState<
+    'commit-by-commit' | 'whole-diff' | null
+  >(null);
+  const [baselineWalkthroughStructureOverride, setBaselineWalkthroughStructureOverride] = useState<
+    'commit-by-commit' | 'whole-diff' | null
+  >(null);
   const snapshotReviewComments = useMemo(() => getSnapshotReviewComments(snapshot), [snapshot]);
   const [editedReviewCommentBodies, setEditedReviewCommentBodies] = useState<
     Readonly<Record<string, string>>
@@ -2105,11 +2162,13 @@ export function ReviewSurface({
     () => orderedAIReviews[0]?.id ?? null,
   );
   useEffect(() => {
-    setSelectedAIReviewId((current) =>
-      orderedAIReviews.some((review) => review.id === current)
-        ? current
-        : (orderedAIReviews[0]?.id ?? null),
-    );
+    queueMicrotask(() => {
+      setSelectedAIReviewId((current) =>
+        orderedAIReviews.some((review) => review.id === current)
+          ? current
+          : (orderedAIReviews[0]?.id ?? null),
+      );
+    });
   }, [orderedAIReviews]);
   const selectedAIReview =
     orderedAIReviews.find((review) => review.id === selectedAIReviewId) ??
@@ -2157,10 +2216,7 @@ export function ReviewSurface({
     [commitFilesBySha, selectedTreeCommitShas],
   );
   const versionCompareActive =
-    versionCompareEnabled === true ||
-    versionCompare != null ||
-    versionCompareLoading ||
-    Boolean(versionCompareError);
+    versionCompareEnabled === true || versionCompare != null || versionCompareLoading;
   const versionCompareChangedPaths = useMemo(() => {
     const files =
       sidebarMode === 'walkthrough' && versionCompare
@@ -2224,16 +2280,57 @@ export function ReviewSurface({
 
   useEffect(() => {
     if (selectedCommitSha) {
-      setActiveCommitSha(selectedCommitSha);
-      setSelectedTreeCommitShas(new Set([selectedCommitSha]));
+      queueMicrotask(() => {
+        setActiveCommitSha(selectedCommitSha);
+        setSelectedTreeCommitShas(new Set([selectedCommitSha]));
+      });
     }
   }, [selectedCommitSha]);
 
   const commitDiffTargetSha =
-    sidebarMode === 'walkthrough' || sidebarMode === 'commits'
-      ? (walkthroughCommitSha ?? activeCommitSha)
-      : null;
+    sidebarMode === 'commits'
+      ? activeCommitSha
+      : sidebarMode === 'walkthrough' && !legacyWalkthroughNeedsCommitDiffs
+        ? walkthroughCommitSha
+        : null;
   useEffect(() => {
+    if (sidebarMode === 'walkthrough' && legacyWalkthroughNeedsCommitDiffs) {
+      if (missingWalkthroughCommitShas.length === 0 || !interactive?.onLoadCommitDiff) {
+        return;
+      }
+      const requestId = commitLoadRequestRef.current + 1;
+      commitLoadRequestRef.current = requestId;
+      queueMicrotask(() => {
+        setCommitDiffLoading(true);
+        setCommitDiffError(null);
+      });
+      void Promise.all(
+        missingWalkthroughCommitShas.map((sha) =>
+          Promise.resolve(interactive.onLoadCommitDiff!(sha)).then((files) => ({ files, sha })),
+        ),
+      )
+        .then((results) => {
+          if (commitLoadRequestRef.current !== requestId) {
+            return;
+          }
+          setCommitFilesBySha((current) => ({
+            ...current,
+            ...Object.fromEntries(results.map(({ files, sha }) => [sha, files])),
+          }));
+        })
+        .catch((error: unknown) => {
+          if (commitLoadRequestRef.current !== requestId) {
+            return;
+          }
+          setCommitDiffError(error instanceof Error ? error.message : String(error));
+        })
+        .finally(() => {
+          if (commitLoadRequestRef.current === requestId) {
+            setCommitDiffLoading(false);
+          }
+        });
+      return;
+    }
     if (
       (sidebarMode !== 'commits' && sidebarMode !== 'walkthrough') ||
       !commitDiffTargetSha ||
@@ -2246,8 +2343,10 @@ export function ReviewSurface({
     }
     const requestId = commitLoadRequestRef.current + 1;
     commitLoadRequestRef.current = requestId;
-    setCommitDiffLoading(true);
-    setCommitDiffError(null);
+    queueMicrotask(() => {
+      setCommitDiffLoading(true);
+      setCommitDiffError(null);
+    });
     void Promise.resolve(interactive.onLoadCommitDiff(commitDiffTargetSha))
       .then((files) => {
         if (commitLoadRequestRef.current !== requestId) {
@@ -2267,7 +2366,14 @@ export function ReviewSurface({
           setCommitDiffLoading(false);
         }
       });
-  }, [commitDiffTargetSha, commitFilesBySha, interactive, sidebarMode]);
+  }, [
+    commitDiffTargetSha,
+    commitFilesBySha,
+    interactive,
+    legacyWalkthroughNeedsCommitDiffs,
+    missingWalkthroughCommitShas,
+    sidebarMode,
+  ]);
 
   useEffect(() => {
     if (
@@ -2283,8 +2389,10 @@ export function ReviewSurface({
       return;
     }
     let cancelled = false;
-    setTreeCommitDiffLoading(true);
-    setTreeCommitDiffError(null);
+    queueMicrotask(() => {
+      setTreeCommitDiffLoading(true);
+      setTreeCommitDiffError(null);
+    });
     void Promise.all(
       missingShas.map((sha) =>
         Promise.resolve(interactive.onLoadCommitDiff!(sha)).then((files) => ({ files, sha })),
@@ -2672,6 +2780,18 @@ export function ReviewSurface({
     interactiveRef.current = interactive;
   }, [interactive]);
 
+  const beginWalkthroughGeneration = useCallback(
+    (options: typeof walkthroughGenerationOptionsRef.current) => {
+      walkthroughGenerationOptionsRef.current = options;
+      walkthroughRequestPendingRef.current = true;
+      walkthroughRequestForceRef.current = options?.force === true;
+      setWalkthroughRequestForce(options?.force === true);
+      setWalkthroughRequestPending(true);
+      setWalkthroughRequestId((current) => current + 1);
+    },
+    [],
+  );
+
   useEffect(() => {
     if (!walkthroughRequestPending || walkthroughRequestId === 0) {
       return;
@@ -2690,11 +2810,17 @@ export function ReviewSurface({
         walkthroughRequestForceRef.current = false;
         setWalkthroughRequestPending(false);
         setWalkthroughRequestForce(false);
+        const queuedOptions = queuedWalkthroughGenerationOptionsRef.current;
+        if (queuedOptions) {
+          queuedWalkthroughGenerationOptionsRef.current = null;
+          setQueuedReviewStructure(null);
+          queueMicrotask(() => beginWalkthroughGeneration(queuedOptions));
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [walkthroughRequestId, walkthroughRequestPending]);
+  }, [beginWalkthroughGeneration, walkthroughRequestId, walkthroughRequestPending]);
 
   const startWalkthroughGeneration = useCallback(
     (options?: {
@@ -2707,22 +2833,24 @@ export function ReviewSurface({
         walkthroughStructure?: 'auto' | 'commit-by-commit' | 'whole-diff';
       };
     }) => {
+      if (options?.reviewStructure) {
+        setBaselineWalkthroughStructureOverride(options.reviewStructure);
+      }
       if (
         !interactive ||
         interactive.walkthroughStatus === 'generating' ||
         walkthroughRequestPendingRef.current
       ) {
+        if (interactive && options?.force && options.reviewStructure) {
+          queuedWalkthroughGenerationOptionsRef.current = options;
+          setQueuedReviewStructure(options.reviewStructure);
+        }
         return;
       }
 
-      walkthroughGenerationOptionsRef.current = options ?? null;
-      walkthroughRequestPendingRef.current = true;
-      walkthroughRequestForceRef.current = options?.force === true;
-      setWalkthroughRequestForce(options?.force === true);
-      setWalkthroughRequestPending(true);
-      setWalkthroughRequestId((current) => current + 1);
+      beginWalkthroughGeneration(options ?? null);
     },
-    [interactive],
+    [beginWalkthroughGeneration, interactive],
   );
   useEffect(() => {
     if (sidebarMode !== 'walkthrough') {
@@ -2751,11 +2879,11 @@ export function ReviewSurface({
         return;
       }
       lastAutoVersionWalkthroughKeyRef.current = key;
-      startWalkthroughGeneration(versionCompareWalkthroughOptions);
+      queueMicrotask(() => startWalkthroughGeneration(versionCompareWalkthroughOptions));
       return;
     }
     if (interactive?.walkthroughStatus === 'idle') {
-      startWalkthroughGeneration();
+      queueMicrotask(() => startWalkthroughGeneration());
     }
   }, [
     interactive?.walkthroughStatus,
@@ -2981,6 +3109,7 @@ export function ReviewSurface({
     activeSearchMatch: null,
     agentId: snapshot.walkthrough.agent,
     agentLabel: getAgentLabel(snapshot.walkthrough.agent),
+    canSubmitReviewComments,
     codeQualityFindings: snapshot.codeQualityFindings,
     collapsed,
     comments: reviewComments,
@@ -3161,14 +3290,27 @@ export function ReviewSurface({
     walkthroughReady &&
     Boolean(versionCompare) &&
     versionWalkthroughStructure === 'commit-by-commit' &&
+    !legacyWalkthroughNeedsCommitDiffs &&
     walkthroughFiles.length === 0;
+  const legacyWalkthroughDiffLoading =
+    walkthroughReady &&
+    legacyWalkthroughNeedsCommitDiffs &&
+    missingWalkthroughCommitShas.length > 0 &&
+    commitDiffLoading;
+  const legacyWalkthroughDiffError =
+    walkthroughReady &&
+    legacyWalkthroughNeedsCommitDiffs &&
+    missingWalkthroughCommitShas.length > 0 &&
+    commitDiffError;
   const walkthroughFailed = walkthroughStatus === 'failed';
   const walkthroughIdle = walkthroughStatus === 'idle';
+  const baselineWalkthroughStructure =
+    baselineWalkthroughStructureOverride ?? interactive?.reviewStrategy?.mode ?? 'whole-diff';
   const walkthroughStructurePhrase = versionCompareActive
     ? versionWalkthroughStructure === 'commit-by-commit'
       ? 'commit-by-commit version'
       : 'whole-diff version'
-    : interactive?.reviewStrategy?.mode === 'commit-by-commit'
+    : baselineWalkthroughStructure === 'commit-by-commit'
       ? 'commit-by-commit'
       : 'whole-diff';
   const computingVersionChanges = Boolean(versionCompareLoading);
@@ -3224,7 +3366,7 @@ export function ReviewSurface({
     startWalkthroughGeneration(options);
   };
   const alternateReviewStructure =
-    interactive?.reviewStrategy?.mode === 'commit-by-commit' ? 'whole-diff' : 'commit-by-commit';
+    baselineWalkthroughStructure === 'commit-by-commit' ? 'whole-diff' : 'commit-by-commit';
   const showCommentsTab = Boolean(commenting || interactive || generalCommentCount > 0);
   const reviewModes = [
     {
@@ -3403,7 +3545,7 @@ export function ReviewSurface({
                   onClick={() => interactive.onExitVersionCompare?.()}
                   type="button"
                 >
-                  Whole MR
+                  {wholeDiffLabel}
                 </button>
                 <button
                   aria-pressed={versionCompareActive}
@@ -3412,16 +3554,19 @@ export function ReviewSurface({
                   onClick={selectVersionComparisonScope}
                   type="button"
                 >
-                  Compare versions
+                  {versionHistoryLabel === 'Head history' ? 'Compare heads' : 'Compare versions'}
                 </button>
               </div>
             </div>
+            {!versionCompareActive && versionHistoryWarning ? (
+              <div className="version-comparison-status">{versionHistoryWarning}</div>
+            ) : null}
             {versionSectionExpanded && versionCompareActive ? (
               <div className="version-comparison-body" id="version-comparison-body">
                 {versionHistoryLoading ? (
                   <div aria-live="polite" className="version-comparison-status" role="status">
                     <span aria-hidden className="version-comparison-spinner" />
-                    Loading version history…
+                    {`Loading ${versionHistoryLabel.toLowerCase()}…`}
                   </div>
                 ) : versions.length >= 2 && interactive?.onVersionCompareRangeChange ? (
                   <div className="version-picker-pair">
@@ -3836,7 +3981,7 @@ export function ReviewSurface({
               <div className="history-section">
                 {interactive.reviewStrategy.mode === 'commit-by-commit'
                   ? 'Structured by commits'
-                  : `Whole MR (${interactive.reviewStrategy.reason})`}
+                  : `${wholeDiffLabel} (${interactive.reviewStrategy.reason})`}
               </div>
             ) : null}
             {commits.map((commit) => {
@@ -3924,9 +4069,9 @@ export function ReviewSurface({
             {!versionCompareActive && interactive?.reviewStrategy ? (
               <div className="history-section walkthrough-structure-controls">
                 <span>
-                  {interactive.reviewStrategy.mode === 'commit-by-commit'
+                  {baselineWalkthroughStructure === 'commit-by-commit'
                     ? 'Structured by commits'
-                    : `Whole MR (${interactive.reviewStrategy.reason})`}
+                    : `${wholeDiffLabel} (${interactive.reviewStrategy.reason})`}
                 </span>
                 <button
                   aria-label={
@@ -3974,7 +4119,7 @@ export function ReviewSurface({
                         requestWalkthrough({
                           force: true,
                           reviewStructure:
-                            interactive.reviewStrategy?.mode === 'commit-by-commit'
+                            baselineWalkthroughStructure === 'commit-by-commit'
                               ? 'commit-by-commit'
                               : 'whole-diff',
                         })
@@ -3986,28 +4131,62 @@ export function ReviewSurface({
           </>
         ) : (
           <div className="sidebar-walkthrough-status-shell">
-            <div
-              className={`sidebar-walkthrough-status${walkthroughStatus === 'generating' ? ' codex' : ''}`}
-              title={walkthroughStatusDescription ?? undefined}
-            >
-              {walkthroughFailed ||
-              (walkthroughIdle && !walkthroughBusy && !computingVersionChanges) ? (
-                <>
-                  <strong>{walkthroughStatusTitle}</strong>
-                  {walkthroughStatusDescription ? (
-                    <span>{walkthroughStatusDescription}</span>
+            <div className="sidebar-walkthrough-status-stack">
+              {walkthroughBusy && !versionCompareActive && interactive?.reviewStrategy ? (
+                <div className="walkthrough-generation-structure">
+                  <strong>
+                    Generating ·{' '}
+                    {baselineWalkthroughStructure === 'commit-by-commit'
+                      ? 'Commit-by-commit'
+                      : wholeDiffLabel}
+                  </strong>
+                  <button
+                    onClick={() =>
+                      requestWalkthrough({
+                        force: true,
+                        reviewStructure: alternateReviewStructure,
+                      })
+                    }
+                    type="button"
+                  >
+                    Switch to{' '}
+                    {alternateReviewStructure === 'commit-by-commit'
+                      ? 'commit-by-commit'
+                      : wholeDiffLabel}
+                  </button>
+                  {queuedReviewStructure ? (
+                    <small>
+                      Queued:{' '}
+                      {queuedReviewStructure === 'commit-by-commit'
+                        ? 'commit-by-commit'
+                        : wholeDiffLabel}
+                    </small>
                   ) : null}
-                </>
-              ) : (
-                <WalkthroughProgress
-                  detail={walkthroughStatusDescription}
-                  label={walkthroughProgressLabel}
-                  phase={null}
-                  progress={walkthroughGenerationProgress}
-                  responseLabelIndex={0}
-                  stageRevision={walkthroughProgressRevision}
-                />
-              )}
+                </div>
+              ) : null}
+              <div
+                className={`sidebar-walkthrough-status${walkthroughStatus === 'generating' ? ' codex' : ''}`}
+                title={walkthroughStatusDescription ?? undefined}
+              >
+                {walkthroughFailed ||
+                (walkthroughIdle && !walkthroughBusy && !computingVersionChanges) ? (
+                  <>
+                    <strong>{walkthroughStatusTitle}</strong>
+                    {walkthroughStatusDescription ? (
+                      <span>{walkthroughStatusDescription}</span>
+                    ) : null}
+                  </>
+                ) : (
+                  <WalkthroughProgress
+                    detail={walkthroughStatusDescription}
+                    label={walkthroughProgressLabel}
+                    phase={null}
+                    progress={walkthroughGenerationProgress}
+                    responseLabelIndex={0}
+                    stageRevision={walkthroughProgressRevision}
+                  />
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -4210,19 +4389,13 @@ export function ReviewSurface({
               ) : null}
             </div>
           </div>
-        ) : walkthroughReady &&
-          walkthroughCommitSha &&
-          !commitFilesBySha[walkthroughCommitSha] &&
-          commitDiffLoading ? (
+        ) : legacyWalkthroughDiffLoading ? (
           <div className="loading codex italic">Loading commit walkthrough code…</div>
-        ) : walkthroughReady &&
-          walkthroughCommitSha &&
-          !commitFilesBySha[walkthroughCommitSha] &&
-          commitDiffError ? (
+        ) : legacyWalkthroughDiffError ? (
           <div className="empty-state">
             <div className="empty-panel squircle">
               <strong>Unable to load commit walkthrough code</strong>
-              <p>{commitDiffError}</p>
+              <p>{legacyWalkthroughDiffError}</p>
             </div>
           </div>
         ) : walkthroughReady ? (
@@ -4387,6 +4560,7 @@ export function MergeRequestReviewApp({
   onVersionCompareRangeChange,
   onVersionWalkthroughStructureChange,
   preferences,
+  providerLabel = 'provider',
   reviewStrategy,
   selectedCommitSha,
   settingsBar,
@@ -4402,13 +4576,16 @@ export function MergeRequestReviewApp({
   versionCompareFromId,
   versionCompareLoading,
   versionCompareToId,
+  versionHistoryLabel = 'Versions',
   versionHistoryLoading,
+  versionHistoryWarning,
   versions,
   versionWalkthroughStructure,
   walkthrough,
   walkthroughError,
   walkthroughProgress,
   walkthroughStatus,
+  wholeDiffLabel = 'Whole MR',
 }: MergeRequestReviewAppProps) {
   const placeholderWalkthrough = useMemo<NarrativeWalkthrough>(
     () => ({
@@ -4493,6 +4670,7 @@ export function MergeRequestReviewApp({
       }}
       onModeChange={onModeChange}
       onVersionWalkthroughStructureChange={onVersionWalkthroughStructureChange}
+      providerLabel={providerLabel}
       selectedCommitSha={selectedCommitSha}
       settingsBar={settingsBar}
       snapshot={snapshot}
@@ -4507,9 +4685,12 @@ export function MergeRequestReviewApp({
       versionCompareFromId={versionCompareFromId}
       versionCompareLoading={versionCompareLoading}
       versionCompareToId={versionCompareToId}
+      versionHistoryLabel={versionHistoryLabel}
       versionHistoryLoading={versionHistoryLoading}
+      versionHistoryWarning={versionHistoryWarning}
       versions={versions}
       versionWalkthroughStructure={versionWalkthroughStructure}
+      wholeDiffLabel={wholeDiffLabel}
     />
   );
 }
