@@ -1420,7 +1420,7 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
       try {
         return {
           status: 'ready',
-          walkthrough: normalizeNarrativeWalkthrough(input, state.files, {
+          walkthrough: await normalizeNarrativeWalkthrough(input, state.files, {
             agent: agent.id,
             branch: state.branch,
             context: sessionContext,
@@ -1453,7 +1453,7 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
     const agentOptions = getAgentOptions(agent);
     const walkthroughModel = resolveNarrativeWalkthroughModel(state, agent, agentOptions.model);
     const walkthroughPrompt = config.settings.walkthroughPrompt;
-    const cacheKey = getNarrativeWalkthroughCacheKey(
+    const cacheKey = await getNarrativeWalkthroughCacheKey(
       state,
       agent,
       walkthroughModel,
@@ -1498,7 +1498,7 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
       options?.previousWalkthrough,
     );
     if (result.status === 'ready') {
-      const generatedCacheKey = getNarrativeWalkthroughCacheKey(
+      const generatedCacheKey = await getNarrativeWalkthroughCacheKey(
         state,
         agent,
         generatedModel,
