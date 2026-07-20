@@ -3,6 +3,7 @@ packages:
   - service
   - web
   - gitlab
+  - github
 
 allowBuilds:
   '@google/genai': false

@@ -9,11 +9,6 @@ const testWorkers = Math.max(1, Math.min(4, Math.floor(availableParallelism() / 
 
 export default defineConfig({
   // Added by jjk so Vite/Vitest does not watch jj internals (see jj FAQ).
-  server: {
-    watch: {
-      ignored: ['**/.jj/**'],
-    },
-  },
   base: './',
   build: {
     chunkSizeWarningLimit: 10 * 1024,
@@ -107,6 +102,11 @@ export default defineConfig({
       },
     },
   },
+  server: {
+    watch: {
+      ignored: ['**/.jj/**'],
+    },
+  },
   staged: {
     '*': 'vp check --fix',
   },
@@ -114,6 +114,7 @@ export default defineConfig({
     include: [
       'core/**/*.test.{ts,tsx}',
       'gitlab/**/*.test.ts',
+      'github/**/*.test.ts',
       'electron/**/*.test.ts',
       'service/**/*.test.ts',
       'web/**/*.test.{ts,tsx}',
