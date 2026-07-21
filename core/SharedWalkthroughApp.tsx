@@ -123,6 +123,7 @@ import type {
   ReviewVersionOption,
   RepositoryState,
   SharedWalkthroughSnapshot,
+  WalkthroughGenerationProgress,
   WalkthroughCommitMessageResult,
   WalkthroughCommitResult,
 } from './types.ts';
@@ -272,6 +273,7 @@ export type MergeRequestReviewAppProps = {
   versionWalkthroughStructure?: 'commit-by-commit' | 'whole-diff';
   walkthrough: NarrativeWalkthrough | null;
   walkthroughError?: string | null;
+  walkthroughProgress?: WalkthroughGenerationProgress | null;
   walkthroughStatus: MergeRequestWalkthroughStatus;
 };
 
@@ -1377,6 +1379,7 @@ export type ReviewSurfaceProps = {
     onVersionCompareRangeChange?: (fromId: string, toId: string) => void;
     reviewStrategy?: MergeRequestReviewStrategySummary | null;
     walkthroughError?: string | null;
+    walkthroughProgress?: WalkthroughGenerationProgress | null;
     walkthroughStatus: MergeRequestWalkthroughStatus;
   };
   onDeleteShare?: () => Promise<void> | void;
@@ -3176,6 +3179,7 @@ export function ReviewSurface({
     walkthroughBusy && !walkthroughRequestForce && walkthroughStatus !== 'generating';
   const generatingWalkthrough =
     walkthroughBusy && (walkthroughRequestForce || walkthroughStatus === 'generating');
+  const walkthroughGenerationProgress = interactive?.walkthroughProgress ?? null;
   const walkthroughStatusTitle = walkthroughFailed
     ? 'Walkthrough unavailable'
     : computingVersionChanges
@@ -3183,8 +3187,8 @@ export function ReviewSurface({
       : walkthroughIdle && !walkthroughBusy
         ? 'Walkthrough not generated'
         : loadingWalkthroughLookup
-          ? `Loading ${walkthroughStructurePhrase} walkthrough…`
-          : `Generating ${walkthroughStructurePhrase} walkthrough…`;
+          ? 'Loading walkthrough…'
+          : 'Generating walkthrough…';
   const walkthroughStatusDescription = walkthroughFailed
     ? (interactive?.walkthroughError ?? 'Fix the generation issue, then try again.')
     : computingVersionChanges
@@ -3193,16 +3197,17 @@ export function ReviewSurface({
         ? versionCompareActive
           ? 'Choose a walkthrough structure, then generate it for this version comparison.'
           : 'Generate a walkthrough to review these changes.'
-        : (interactive?.walkthroughError ??
+        : (walkthroughGenerationProgress?.summary ??
+          interactive?.walkthroughError ??
           (loadingWalkthroughLookup
-            ? `Looking up a cached ${walkthroughStructurePhrase} walkthrough for this scope.`
-            : `Building the ${walkthroughStructurePhrase} walkthrough.`));
+            ? `Looking up a cached ${walkthroughStructurePhrase} walkthrough.`
+            : null));
   const walkthroughProgressLabel = computingVersionChanges
     ? 'Computing version changes…'
     : loadingWalkthroughLookup
-      ? `Loading ${walkthroughStructurePhrase} walkthrough…`
+      ? 'Loading walkthrough…'
       : generatingWalkthrough
-        ? `Generating ${walkthroughStructurePhrase} walkthrough…`
+        ? 'Generating walkthrough…'
         : undefined;
   const shellTheme =
     snapshot.preferences.theme === 'system' ? undefined : snapshot.preferences.theme;
@@ -3998,6 +4003,7 @@ export function ReviewSurface({
                   detail={walkthroughStatusDescription}
                   label={walkthroughProgressLabel}
                   phase={null}
+                  progress={walkthroughGenerationProgress}
                   responseLabelIndex={0}
                   stageRevision={walkthroughProgressRevision}
                 />
@@ -4126,6 +4132,7 @@ export function ReviewSurface({
                 detail="Comparing the selected versions and preparing the review surface."
                 label="Computing version changes…"
                 phase={null}
+                progress={walkthroughGenerationProgress}
                 responseLabelIndex={0}
                 stageRevision={walkthroughProgressRevision}
               />
@@ -4275,6 +4282,7 @@ export function ReviewSurface({
               detail={walkthroughStatusDescription}
               label={walkthroughProgressLabel ?? walkthroughStatusTitle}
               phase={null}
+              progress={walkthroughGenerationProgress}
               responseLabelIndex={0}
               stageRevision={walkthroughProgressRevision}
             />
@@ -4399,6 +4407,7 @@ export function MergeRequestReviewApp({
   versionWalkthroughStructure,
   walkthrough,
   walkthroughError,
+  walkthroughProgress,
   walkthroughStatus,
 }: MergeRequestReviewAppProps) {
   const placeholderWalkthrough = useMemo<NarrativeWalkthrough>(
@@ -4479,6 +4488,7 @@ export function MergeRequestReviewApp({
         onVersionCompareRangeChange,
         reviewStrategy,
         walkthroughError,
+        walkthroughProgress,
         walkthroughStatus,
       }}
       onModeChange={onModeChange}

@@ -4,9 +4,12 @@ import type {
   ReviewCommitEvolution,
   ReviewPlan,
   ReviewUnit,
+  WalkthroughGenerationProgress,
+  WalkthroughGenerationUnitProgress,
 } from '../types.ts';
 import { resolveReviewPlan, reviewableUnits } from './review-history.ts';
 import {
+  buildVersionCommitOverviewPrompt,
   buildWalkthroughPrompt,
   composeUnitWalkthroughs,
   normalizeWalkthroughDraft,
@@ -25,6 +28,10 @@ export type ReviewWalkthroughRunModel = (input: {
   state: RepositoryState;
 }) => Promise<ReviewWalkthroughModelResult>;
 
+export type ReviewWalkthroughRunOverviewModel = (input: {
+  agent: NarrativeWalkthrough['agent'];
+  prompt: string;
+}) => Promise<{ focus: string }>;
 export type GenerateReviewWalkthroughInput = {
   agent: NarrativeWalkthrough['agent'];
   /**
@@ -32,6 +39,8 @@ export type GenerateReviewWalkthroughInput = {
    * Hosts typically pass the projected Core evolution for the active compare.
    */
   evolution?: ReviewCommitEvolution | null;
+  /** Receives unit-level status updates during commit-by-commit generation. */
+  onProgress?: (progress: WalkthroughGenerationProgress) => void;
   /**
    * Optional explicit plan. When omitted, resolved from evolution recommendation
    * (units if recommended and unit states exist; otherwise whole-diff).
@@ -41,6 +50,8 @@ export type GenerateReviewWalkthroughInput = {
   promptOptions?: WalkthroughPromptOptions;
   /** Host-provided model runner (local agent CLI, Think, etc.). */
   runModel: ReviewWalkthroughRunModel;
+  /** Optional second model call that synthesizes the cross-commit review focus. */
+  runOverviewModel?: ReviewWalkthroughRunOverviewModel;
   /**
    * Whole-diff state and/or per-unit states.
    * - whole-diff plan: provide `whole`
@@ -52,6 +63,8 @@ export type GenerateReviewWalkthroughInput = {
   };
   /** Force whole-diff even when a units plan is available. */
   structure?: 'auto' | 'commit-by-commit' | 'whole-diff' | 'units';
+  /** Maximum number of model-backed commit units to generate concurrently. */
+  unitConcurrency?: number;
 };
 
 export type GenerateReviewWalkthroughResult =
@@ -125,6 +138,33 @@ const toPromptOptionsForUnit = (
       toLabel: range.toLabel,
     },
   };
+};
+
+const unitLabel = (unit: ReviewUnit) => {
+  const commit = unitAfter(unit) ?? unitBefore(unit);
+  return commit ? `${commit.shortSha} ${commit.subject}` : unit.id;
+};
+
+const mapWithConcurrency = async <T, Result>(
+  items: ReadonlyArray<T>,
+  limit: number,
+  worker: (item: T, index: number) => Promise<Result>,
+): Promise<Array<Result>> => {
+  const results = new Array<Result>(items.length);
+  let nextIndex = 0;
+  const runWorker = async () => {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= items.length) {
+        return;
+      }
+      results[index] = await worker(items[index]!, index);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(Math.max(1, limit), items.length) }, () => runWorker()),
+  );
+  return results;
 };
 
 /**
@@ -211,73 +251,120 @@ export async function generateReviewWalkthrough(
 
   const entries: Array<UnitWalkthroughEntry> = [];
   const failures: Array<string> = [];
+  const progressUnits: Array<WalkthroughGenerationUnitProgress> = units.map((unit) => ({
+    id: unit.id,
+    label: unitLabel(unit),
+    status: 'pending' as const,
+  }));
+  const reportUnitProgress = (
+    summary: string,
+    phase: WalkthroughGenerationProgress['phase'] = 'generating-units',
+  ) => {
+    input.onProgress?.({
+      completed: progressUnits.filter((unit) => unit.status === 'ready' || unit.status === 'failed')
+        .length,
+      phase,
+      summary,
+      total: units.length,
+      units: progressUnits.map((unit) => ({ ...unit })),
+    });
+  };
+  reportUnitProgress(`Generating ${units.length} commit walkthroughs.`);
 
-  for (const unit of units) {
-    const unitState = input.states.byUnitId?.[unit.id];
-    if (!unitState || unitState.files.length === 0) {
-      failures.push(`${unit.id}: missing unit diff state`);
-      continue;
-    }
-    try {
-      const prompt = buildWalkthroughPrompt(
-        unitState,
-        toPromptOptionsForUnit(unit, range, input.promptOptions),
-      );
-      const { draft } = await input.runModel({
-        agent: input.agent,
-        prompt,
-        state: unitState,
-      });
-      const walkthrough = normalizeWalkthroughDraft(draft, unitState, input.agent);
-      const after = unitAfter(unit);
-      const before = unitBefore(unit);
-      const context: UnitWalkthroughEntry['context'] = {
-        kind: 'version-commit',
-        range,
-        unitId: unit.id,
-        ...(after
-          ? {
-              after: {
-                sha: after.sha,
-                shortSha: after.shortSha,
-                subject: after.subject,
-                ...(after.webUrl ? { webUrl: after.webUrl } : {}),
-              },
-            }
-          : {}),
-        ...(before
-          ? {
-              before: {
-                sha: before.sha,
-                shortSha: before.shortSha,
-                subject: before.subject,
-                ...(before.webUrl ? { webUrl: before.webUrl } : {}),
-              },
-            }
-          : {}),
-        ...('rebaseDrivers' in unit && unit.rebaseDrivers
-          ? {
-              rebaseDrivers: unit.rebaseDrivers.map((driver) => ({
-                ...(driver.authoredAt ? { authoredAt: driver.authoredAt } : {}),
-                ...(driver.authorName ? { authorName: driver.authorName } : {}),
-                ...(driver.overlappingPaths
-                  ? { overlappingPaths: [...driver.overlappingPaths] }
-                  : {}),
-                ...(driver.sha ? { sha: driver.sha } : {}),
-                shortSha: driver.shortSha,
-                subject: driver.subject,
-                ...(driver.webUrl ? { webUrl: driver.webUrl } : {}),
-              })),
-            }
-          : {}),
+  const outcomes = await mapWithConcurrency(
+    units,
+    input.unitConcurrency ?? 3,
+    async (unit, index): Promise<{ entry?: UnitWalkthroughEntry; failure?: string }> => {
+      const unitState = input.states.byUnitId?.[unit.id];
+      if (!unitState || unitState.files.length === 0) {
+        const failure = `${unit.id}: missing unit diff state`;
+        progressUnits[index] = { ...progressUnits[index]!, detail: failure, status: 'failed' };
+        reportUnitProgress(`Skipping ${unitLabel(unit)} because its diff is unavailable.`);
+        return { failure };
+      }
+      progressUnits[index] = {
+        ...progressUnits[index]!,
+        detail: 'Generating walkthrough…',
+        status: 'generating',
       };
-      entries.push({
-        context,
-        state: unitState,
-        walkthrough,
-      });
-    } catch (error: unknown) {
-      failures.push(`${unit.id}: ${error instanceof Error ? error.message : String(error)}`);
+      reportUnitProgress(`Generating ${unitLabel(unit)}.`);
+      try {
+        const prompt = buildWalkthroughPrompt(
+          unitState,
+          toPromptOptionsForUnit(unit, range, input.promptOptions),
+        );
+        const { draft } = await input.runModel({
+          agent: input.agent,
+          prompt,
+          state: unitState,
+        });
+        const walkthrough = normalizeWalkthroughDraft(draft, unitState, input.agent);
+        const after = unitAfter(unit);
+        const before = unitBefore(unit);
+        const context: UnitWalkthroughEntry['context'] = {
+          evolutionKind: toEvolutionKind(unit.kind),
+          kind: 'version-commit',
+          range,
+          unitId: unit.id,
+          ...(after
+            ? {
+                after: {
+                  sha: after.sha,
+                  shortSha: after.shortSha,
+                  subject: after.subject,
+                  ...(after.webUrl ? { webUrl: after.webUrl } : {}),
+                },
+              }
+            : {}),
+          ...(before
+            ? {
+                before: {
+                  sha: before.sha,
+                  shortSha: before.shortSha,
+                  subject: before.subject,
+                  ...(before.webUrl ? { webUrl: before.webUrl } : {}),
+                },
+              }
+            : {}),
+          ...('rebaseDrivers' in unit && unit.rebaseDrivers
+            ? {
+                rebaseDrivers: unit.rebaseDrivers.map((driver) => ({
+                  ...(driver.authoredAt ? { authoredAt: driver.authoredAt } : {}),
+                  ...(driver.authorName ? { authorName: driver.authorName } : {}),
+                  ...(driver.overlappingPaths
+                    ? { overlappingPaths: [...driver.overlappingPaths] }
+                    : {}),
+                  ...(driver.sha ? { sha: driver.sha } : {}),
+                  shortSha: driver.shortSha,
+                  subject: driver.subject,
+                  ...(driver.webUrl ? { webUrl: driver.webUrl } : {}),
+                })),
+              }
+            : {}),
+        };
+        progressUnits[index] = { ...progressUnits[index]!, status: 'ready' };
+        reportUnitProgress(`Finished ${unitLabel(unit)}.`);
+        return {
+          entry: {
+            context,
+            state: unitState,
+            walkthrough,
+          },
+        };
+      } catch (error: unknown) {
+        const failure = `${unit.id}: ${error instanceof Error ? error.message : String(error)}`;
+        progressUnits[index] = { ...progressUnits[index]!, detail: failure, status: 'failed' };
+        reportUnitProgress(`Could not generate ${unitLabel(unit)}.`);
+        return { failure };
+      }
+    },
+  );
+  for (const outcome of outcomes) {
+    if (outcome.entry) {
+      entries.push(outcome.entry);
+    }
+    if (outcome.failure) {
+      failures.push(outcome.failure);
     }
   }
 
@@ -291,9 +378,24 @@ export async function generateReviewWalkthrough(
     };
   }
 
+  let focus: string | undefined;
+  reportUnitProgress('Composing commit walkthroughs.', 'combining');
+  if (input.runOverviewModel) {
+    try {
+      const overview = await input.runOverviewModel({
+        agent: input.agent,
+        prompt: buildVersionCommitOverviewPrompt({ entries, range }),
+      });
+      focus = overview.focus.trim() || undefined;
+    } catch {
+      // The detailed unit walkthrough remains useful if a best-effort overview fails.
+    }
+  }
+
   const walkthrough = composeUnitWalkthroughs({
     agent: input.agent,
     entries,
+    focus,
     state: wholeState,
   });
 
