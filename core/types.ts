@@ -125,16 +125,8 @@ export type ReviewSource =
       type: 'branch-diff';
     }
   | {
-      /**
-       * Resolved base commit for the branch part of the comparison. Optional
-       * because the CLI can construct this source from just a branch name
-       * (`codiff main`), before merge-base resolution happens; the resolved
-       * state's `source` always carries a concrete value.
-       */
       baseRef?: string;
-      /** Resolved head commit for the branch part of the comparison. See {@link baseRef}. */
       headRef?: string;
-      /** Target branch the current branch was compared against. */
       ref: string;
       type: 'branch-working-tree';
     }
@@ -365,8 +357,6 @@ export type SharedPlanSnapshot = {
   version: 1;
 };
 
-export type WalkthroughShareManifestV1 = SharedWalkthroughSnapshot;
-
 export type ShareResult =
   | {
       status: 'uploaded';
@@ -378,7 +368,329 @@ export type ShareResult =
     };
 
 export type SharePlanResult = ShareResult;
+
+export type WalkthroughShareManifestV1 = SharedWalkthroughSnapshot;
+
+export type ReviewPreferences = Pick<
+  CodiffPreferences,
+  'codeFontFamily' | 'codeFontSize' | 'diffStyle' | 'showWhitespace' | 'theme' | 'wordWrap'
+>;
 export type ShareWalkthroughResult = ShareResult;
+
+/**
+ * Mutable display label for a revision.
+ *
+ * Labels can move or be renumbered (bookmarks, version tags). They are for
+ * display and navigation only and must not be treated as durable identity.
+ */
+export type RevisionLabel = {
+  kind: 'bookmark' | 'branch' | 'commit' | 'review-marker' | 'tag' | 'version';
+  text: string;
+  /** Optional provider web URL for this label (for example a commit page). */
+  url?: string;
+};
+
+/**
+ * Provider-neutral revision identity for this iteration of Codiff.
+ *
+ * `commitId` is the full Git commit SHA. Provider-specific extras such as a
+ * GitLab `startSha` stay inside the provider adapter and are projected into
+ * this shape at the host boundary.
+ */
+export type RevisionRef = {
+  /** Additional display labels that resolve to the same commit. */
+  aliases?: ReadonlyArray<RevisionLabel>;
+  /** Full Git commit SHA for this iteration. */
+  commitId: string;
+  label: RevisionLabel;
+};
+
+/**
+ * Provider-neutral base/head review range.
+ *
+ * Contains only review semantics shared across hosts. GitLab retains its full
+ * `{ baseSha, startSha, headSha }` identity inside the GitLab adapter for
+ * historical fetches, cache keys, and comment positions. `startSha` is not
+ * authoring input.
+ */
+export type DiffRange = {
+  base: RevisionRef;
+  head: RevisionRef;
+};
+
+/** Identity of a before/after review comparison. */
+export type DiffComparison = {
+  after: DiffRange;
+  before: DiffRange;
+};
+
+export type DiffComparisonCommentAssociation = {
+  commentId: string;
+  filePath?: string;
+  status: 'newly-anchored' | 'outdated' | 'resolved-by-change' | 'still-valid';
+};
+
+export type DiffComparisonBaseMovementCommit = {
+  authoredAt: string;
+  authorName: string;
+  sha: string;
+  shortSha: string;
+  subject: string;
+  webUrl?: string;
+};
+
+export type DiffComparisonBaseMovement = {
+  changed: boolean;
+  commits?: ReadonlyArray<DiffComparisonBaseMovementCommit>;
+  commitsBetween: number | null;
+  commitTimestampDeltaMs: number | null;
+  diffStat: { additions: number; deletions: number; filesChanged: number } | null;
+  from: { committedAt: string | null; sha: string; shortSha: string; webUrl?: string };
+  relationship: 'forward' | 'backward' | 'divergent' | 'unknown';
+  to: { committedAt: string | null; sha: string; shortSha: string; webUrl?: string };
+  truncated: boolean;
+  warning?: string;
+};
+
+export type DiffComparisonSummary = {
+  addedLines: number;
+  baseMoved: boolean;
+  commentsAffected: number;
+  conflictFiles: number;
+  deletedLines: number;
+  empty: boolean;
+  filesChanged: number;
+  intentionalFiles: number;
+  noiseFiles: number;
+};
+
+export type ReviewCommitSummary = {
+  authoredAt: string;
+  authorName: string;
+  diffStat?: { additions: number; deletions: number; filesChanged: number };
+  parentIds: ReadonlyArray<string>;
+  sha: string;
+  shortSha: string;
+  subject: string;
+  webUrl?: string;
+};
+
+export type ReviewRebaseDriverCommit = {
+  authoredAt: string;
+  authorName: string;
+  overlappingPaths: ReadonlyArray<string>;
+  sha: string;
+  shortSha: string;
+  subject: string;
+  webUrl?: string;
+};
+
+/**
+ * Discriminated reviewable work unit.
+ *
+ * Units are generation targets only. Non-reviewable stack markers such as
+ * retained or absorbed commits live on {@link ReviewEvolutionUnit}.
+ */
+export type ReviewUnit =
+  | {
+      commit: ReviewCommitSummary;
+      id: string;
+      /** Parent-to-commit range for an ordinary MR commit. */
+      kind: 'commit';
+      order: number;
+      reviewable: true;
+    }
+  | {
+      after: ReviewCommitSummary;
+      confidence: 'exact' | 'high' | 'unmatched';
+      id: string;
+      /** Newly added range between comparison endpoints. */
+      kind: 'introduced';
+      matchReasons?: ReadonlyArray<string>;
+      matchScore?: number;
+      order: number;
+      reviewable: true;
+    }
+  | {
+      before: ReviewCommitSummary;
+      confidence: 'exact' | 'high' | 'unmatched';
+      id: string;
+      /** Reverse materialization of an earlier range removed from the stack. */
+      kind: 'removed';
+      matchReasons?: ReadonlyArray<string>;
+      matchScore?: number;
+      order: number;
+      reviewable: true;
+    }
+  | {
+      after: ReviewCommitSummary;
+      before: ReviewCommitSummary;
+      confidence: 'exact' | 'high' | 'unmatched';
+      id: string;
+      /** Comparison of earlier and later commit ranges for one logical change. */
+      kind: 'revised';
+      matchReasons?: ReadonlyArray<string>;
+      matchScore?: number;
+      order: number;
+      rebaseDrivers?: ReadonlyArray<ReviewRebaseDriverCommit>;
+      reviewable: true;
+    }
+  | {
+      after?: ReviewCommitSummary;
+      before?: ReviewCommitSummary;
+      confidence: 'exact' | 'high' | 'unmatched';
+      id: string;
+      /** Authoritative fallback range when pairing is uncertain. */
+      kind: 'ambiguous';
+      matchReasons?: ReadonlyArray<string>;
+      matchScore?: number;
+      order: number;
+      reviewable: true;
+    };
+
+/** Non-reviewable evolution markers retained for stack display. */
+export type ReviewEvolutionMarkerUnit = {
+  after?: ReviewCommitSummary;
+  baseCommit?: ReviewCommitSummary;
+  before?: ReviewCommitSummary;
+  confidence: 'exact' | 'high' | 'unmatched';
+  id: string;
+  kind: 'retained' | 'rewritten-same-patch' | 'absorbed-into-base';
+  matchReasons?: ReadonlyArray<string>;
+  matchScore?: number;
+  order: number;
+  reviewable: false;
+};
+
+export type ReviewEvolutionUnit = ReviewUnit | ReviewEvolutionMarkerUnit;
+
+export type ReviewEvolutionSummary = {
+  absorbedIntoBase: number;
+  added: number;
+  ambiguous: number;
+  pairingCoverage: number;
+  removed: number;
+  retained: number;
+  reviewable: number;
+  revised: number;
+  rewrittenSamePatch: number;
+};
+
+/**
+ * Provider recommendation only. Hosts may override before resolving a
+ * {@link ReviewPlan}.
+ */
+export type ReviewStructureRecommendation = {
+  confidence?: number;
+  rationale: string;
+  suggestedStructure: 'commit-by-commit' | 'whole-diff';
+};
+
+export type ReviewCommitEvolution = {
+  recommendation: ReviewStructureRecommendation;
+  summary: ReviewEvolutionSummary;
+  units: ReadonlyArray<ReviewEvolutionUnit>;
+  warnings?: ReadonlyArray<string>;
+};
+
+/**
+ * Derived comparison data kept separate from {@link DiffComparison} identity.
+ */
+export type DiffComparisonAnalysis = {
+  baseMovement?: DiffComparisonBaseMovement;
+  commentAssociations?: ReadonlyArray<DiffComparisonCommentAssociation>;
+  commitEvolution?: ReviewCommitEvolution;
+  summary: DiffComparisonSummary;
+  warnings?: ReadonlyArray<string>;
+};
+
+/**
+ * Resolved generation plan. Distinct from {@link ReviewStructureRecommendation}.
+ *
+ * - `whole-diff` materializes one {@link RepositoryState}
+ * - `units` materializes one {@link RepositoryState} per {@link ReviewUnit}
+ */
+export type ReviewPlan =
+  | {
+      analysis?: DiffComparisonAnalysis;
+      comparison?: DiffComparison;
+      structure: 'whole-diff';
+    }
+  | {
+      analysis?: DiffComparisonAnalysis;
+      comparison?: DiffComparison;
+      structure: 'units';
+      units: ReadonlyArray<ReviewUnit>;
+    };
+
+/**
+ * Host-facing version row for review history pickers.
+ *
+ * Durable identity is `id` plus the projected {@link DiffRange}. Provider
+ * internals such as GitLab `startSha` remain in the adapter.
+ */
+export type ReviewVersionOption = {
+  createdAt: string;
+  diffStat?: { additions: number; deletions: number; filesChanged: number };
+  id: string;
+  isHead?: boolean;
+  number?: number;
+  previousCreatedAt?: string;
+  previousNumber?: number;
+  range: DiffRange;
+};
+
+/** Materialized comparison view consumed by shared review UI. */
+export type DiffComparisonView = {
+  analysis: DiffComparisonAnalysis;
+  comparison: DiffComparison;
+  files: ReadonlyArray<ChangedFile>;
+  from: ReviewVersionOption;
+  to: ReviewVersionOption;
+};
+
+export type ReviewCommitListEntry = {
+  authoredAt: string;
+  authorName: string;
+  role?: string;
+  sha: string;
+  shortSha: string;
+  subject: string;
+  webUrl?: string;
+};
+
+export type ReviewStrategySummary = {
+  confidence: number;
+  mode: 'commit-by-commit' | 'whole-diff';
+  reason: string;
+};
+
+/**
+ * Top-level walkthrough authoring context.
+ *
+ * A range target can use a whole-diff or ordinary commit-unit plan. A
+ * comparison target requires comparison analysis and can use a whole-diff or
+ * evolution-unit plan.
+ */
+export type WalkthroughGenerationInput =
+  | {
+      kind: 'range';
+      plan: ReviewPlan;
+      range: DiffRange;
+      /** Present for whole-diff plans and as the aggregate state for composition. */
+      state: RepositoryState;
+      /** Present for unit plans: one materialized state per review unit. */
+      unitStates?: ReadonlyArray<{ state: RepositoryState; unit: ReviewUnit }>;
+    }
+  | {
+      analysis: DiffComparisonAnalysis;
+      comparison: DiffComparison;
+      kind: 'comparison';
+      plan: ReviewPlan;
+      /** Present for whole-diff comparison plans. */
+      state?: RepositoryState;
+      unitStates?: ReadonlyArray<{ state: RepositoryState; unit: ReviewUnit }>;
+    };
 
 export type WalkthroughContext = {
   changedFiles?: ReadonlyArray<{
@@ -525,7 +837,19 @@ export type WalkthroughHunkGroup = {
 };
 
 /** One stop in the main walkthrough path. */
+export type WalkthroughCommentReference = {
+  authorName: string;
+  body: string;
+  filePath: string;
+  id: string;
+  lineNumber?: number;
+  status: 'newly-anchored' | 'outdated' | 'resolved-by-change' | 'still-valid';
+  url?: string;
+};
+
 export type WalkthroughStop = WalkthroughHunkGroup & {
+  /** Review comments whose anchored code region overlaps this stop. */
+  commentReferences?: ReadonlyArray<WalkthroughCommentReference>;
   importance: 'critical' | 'normal' | 'context';
   /** Agent narration (markdown / inline code). */
   prose: string;
@@ -541,6 +865,28 @@ export type WalkthroughSupportGroup = WalkthroughHunkGroup & {
 /** A named chapter in the walkthrough. */
 export type WalkthroughChapter = {
   blurb: string;
+  /** Commit boundary metadata for commit-by-commit walkthroughs. */
+  commit?: {
+    gitSha?: string;
+    /**
+     * Base-branch commits that likely forced this MR commit rewrite on rebase.
+     * Present for version-comparison commit-by-commit units when attribution exists.
+     */
+    rebaseDrivers?: ReadonlyArray<{
+      authoredAt?: string;
+      authorName?: string;
+      overlappingPaths?: ReadonlyArray<string>;
+      sha?: string;
+      shortSha: string;
+      subject: string;
+      webUrl?: string;
+    }>;
+    revisionCause?: string;
+    sha: string;
+    shortSha: string;
+    subject: string;
+    webUrl?: string;
+  };
   icon: WalkthroughIcon;
   id: string;
   stops: ReadonlyArray<WalkthroughStop>;
@@ -572,6 +918,8 @@ export type NarrativeWalkthrough = {
    * composer at the end of the walkthrough. Stripped unless `source` is a working tree.
    */
   commit?: WalkthroughCommit;
+  /** Commit-scoped diff files used to resolve per-commit walkthrough hunk anchors. */
+  commitFiles?: ReadonlyArray<ChangedFile>;
   /** The originating conversation, embedded for in-app Q&A. */
   context?: WalkthroughContext;
   /** 1–2 sentence summary of the change. */
@@ -754,11 +1102,6 @@ export type CodiffPreferences = {
   wordWrap: boolean;
 };
 
-export type ReviewPreferences = Pick<
-  CodiffPreferences,
-  'codeFontFamily' | 'codeFontSize' | 'diffStyle' | 'showWhitespace' | 'theme' | 'wordWrap'
->;
-
 export type PullRequestReviewComment = {
   anchor?: 'file' | 'line';
   body: string;
@@ -780,8 +1123,49 @@ export type PullRequestExistingReviewComment = PullRequestReviewComment & {
   id: string;
   isOutdated?: boolean;
   isThreadResolved?: boolean;
+  /** Diff identity the comment was positioned against (provider SHAs). */
+  positionIdentity?: {
+    baseSha: string;
+    headSha: string;
+    startSha: string;
+  };
+  resolution?: {
+    confidence: 'approximate' | 'exact';
+    nearbyHunkContext?: {
+      after?: string;
+      before?: string;
+    };
+    versions: ReadonlyArray<{
+      fromLabel: string;
+      toLabel: string;
+    }>;
+  };
   submittedAt?: string;
   url?: string;
+  versionAssociation?: 'exact' | 'unmatched';
+  versionHeadSha?: string;
+  versionId?: string;
+  versionLabel?: string;
+};
+
+export type PullRequestAIReviewDecision =
+  | 'approved'
+  | 'approved-with-comments'
+  | 'changes-requested'
+  | 'unknown';
+
+export type PullRequestAIReview = {
+  body: string;
+  decision: PullRequestAIReviewDecision;
+  id: string;
+  reviewedHeadSha?: string;
+  reviewer: ReviewAuthor & { id: string };
+  submittedAt?: string;
+  url?: string;
+  versionAssociation?: 'exact' | 'unmatched';
+  versionHeadSha?: string;
+  versionId?: string;
+  versionLabel?: string;
 };
 
 export type PullRequestGeneralComment = {

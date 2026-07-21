@@ -2,6 +2,7 @@ packages:
   - core
   - service
   - web
+  - gitlab
 
 allowBuilds:
   '@google/genai': false
