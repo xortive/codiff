@@ -237,10 +237,27 @@ export type CodiffFeatureFlags = {
   walkthroughSharing: boolean;
 };
 
+export type WalkthroughGenerationUnitProgress = {
+  detail?: string;
+  id: string;
+  label: string;
+  status: 'failed' | 'generating' | 'pending' | 'ready';
+};
+
+/** Host/agent progress for an in-flight walkthrough generation. */
+export type WalkthroughGenerationProgress = {
+  completed?: number;
+  phase: 'combining' | 'generating' | 'generating-units' | 'preparing';
+  summary: string;
+  total?: number;
+  units?: ReadonlyArray<WalkthroughGenerationUnitProgress>;
+};
+
 export type WalkthroughProgressPhase = 'agent-generation' | 'response-received';
 
 export type WalkthroughProgressEvent = {
-  phase: WalkthroughProgressPhase;
+  generation?: WalkthroughGenerationProgress;
+  phase?: WalkthroughProgressPhase;
 };
 
 export type CodiffMarkdownDocument = {
@@ -564,6 +581,9 @@ export type ReviewEvolutionMarkerUnit = {
 
 export type ReviewEvolutionUnit = ReviewUnit | ReviewEvolutionMarkerUnit;
 
+/** Classification of a commit while comparing two review versions. */
+export type VersionCommitKind = Exclude<ReviewEvolutionUnit['kind'], 'commit'>;
+
 export type ReviewEvolutionSummary = {
   absorbedIntoBase: number;
   added: number;
@@ -885,6 +905,8 @@ export type WalkthroughChapter = {
     sha: string;
     shortSha: string;
     subject: string;
+    /** Classification when this boundary is a commit from the later comparison version. */
+    versionCommitKind?: VersionCommitKind;
     webUrl?: string;
   };
   icon: WalkthroughIcon;

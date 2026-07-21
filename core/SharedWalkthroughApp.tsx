@@ -23,7 +23,10 @@ import {
 } from 'react';
 import { Avatar } from './app/components/Avatar.tsx';
 import { Button } from './app/components/Button.tsx';
-import { CommitRefTooltip } from './app/components/CommitRefTooltip.tsx';
+import {
+  CommitRefTooltip,
+  versionCommitKindLabel,
+} from './app/components/CommitRefTooltip.tsx';
 import { CommitScopePanel } from './app/components/CommitScopePanel.tsx';
 import {
   isTerminalPullRequestMergeState,
@@ -3513,10 +3516,9 @@ export function ReviewSurface({
                                 key={commit.sha}
                               >
                                 <span
-                                  aria-hidden
-                                  className={`version-commit-kind ${isBackward ? 'removed' : 'introduced'}`}
+                                  className={`version-commit-kind-pill ${isBackward ? 'removed' : 'introduced'}`}
                                 >
-                                  {isBackward ? '−' : '+'}
+                                  {isBackward ? 'Removed' : 'Added'}
                                 </span>
                                 <CommitRefTooltip commit={commit} />
                                 <span>{commit.subject}</span>
@@ -3576,18 +3578,12 @@ export function ReviewSurface({
                           unit.kind === 'retained' ||
                           unit.kind === 'rewritten-same-patch' ||
                           unit.kind === 'absorbed-into-base';
-                        const symbol =
-                          unit.kind === 'introduced'
-                            ? '+'
-                            : unit.kind === 'removed'
-                              ? '−'
-                              : unit.kind === 'revised'
-                                ? '~'
-                                : unit.kind === 'absorbed-into-base'
-                                  ? '↳'
-                                  : unit.kind === 'ambiguous'
-                                    ? '?'
-                                    : '·';
+                        const versionCommitKind =
+                          unit.kind !== 'commit' &&
+                          'after' in unit &&
+                          unit.after?.sha === commit.sha
+                            ? unit.kind
+                            : undefined;
                         const kindClass =
                           unit.kind === 'absorbed-into-base'
                             ? 'absorbed-into-base'
@@ -3639,7 +3635,11 @@ export function ReviewSurface({
                               }
                               type="button"
                             >
-                              <span className={`version-commit-kind ${kindClass}`}>{symbol}</span>
+                              <span className={`version-commit-kind-pill ${kindClass}`}>
+                                {unit.kind === 'commit'
+                                  ? 'Commit'
+                                  : versionCommitKindLabel(unit.kind)}
+                              </span>
                               <CommitRefTooltip
                                 commit={{
                                   additions: commit.diffStat?.additions,
@@ -3649,6 +3649,7 @@ export function ReviewSurface({
                                   sha: commit.sha,
                                   shortSha: commit.shortSha,
                                   subject: commit.subject,
+                                  versionCommitKind,
                                   webUrl: commit.webUrl,
                                 }}
                                 focusable={false}
@@ -3666,11 +3667,8 @@ export function ReviewSurface({
                                     className="version-commit-unit version-base-movement-commit"
                                     key={`${unit.id}:${driver.sha}`}
                                   >
-                                    <span
-                                      aria-hidden
-                                      className="version-commit-kind likely-revised"
-                                    >
-                                      ~
+                                    <span className="version-commit-kind-pill likely-revised">
+                                      Rebase driver
                                     </span>
                                     <CommitRefTooltip
                                       commit={{

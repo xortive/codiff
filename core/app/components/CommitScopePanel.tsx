@@ -113,6 +113,10 @@ export function CommitScopePanel({
                 if (!commit || !onToggleVersionUnit) {
                   return null;
                 }
+                const versionCommitKind =
+                  unit.kind !== 'commit' && 'after' in unit && unit.after?.sha === commit.sha
+                    ? unit.kind
+                    : undefined;
                 return (
                   <label
                     key={unit.id}
@@ -134,6 +138,7 @@ export function CommitScopePanel({
                         sha: commit.sha,
                         shortSha: commit.shortSha,
                         subject: commit.subject,
+                        versionCommitKind,
                         webUrl: commit.webUrl,
                       }}
                       focusable={false}

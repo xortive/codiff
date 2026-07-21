@@ -1,5 +1,6 @@
 import { Tooltip } from '@base-ui/react/tooltip';
 import { ExternalLink } from 'lucide-react';
+import type { VersionCommitKind } from '../../types.ts';
 
 export type CommitRefSummary = {
   additions?: number;
@@ -9,9 +10,28 @@ export type CommitRefSummary = {
   sha: string;
   shortSha: string;
   subject?: string;
+  /** Present only for commits from the later side of a version comparison. */
+  versionCommitKind?: VersionCommitKind;
   webUrl?: string;
 };
-
+export const versionCommitKindLabel = (kind: VersionCommitKind) => {
+  switch (kind) {
+    case 'introduced':
+      return 'Added';
+    case 'removed':
+      return 'Removed';
+    case 'revised':
+      return 'Revised';
+    case 'retained':
+      return 'Unchanged';
+    case 'rewritten-same-patch':
+      return 'Same patch';
+    case 'absorbed-into-base':
+      return 'In target base';
+    case 'ambiguous':
+      return 'Unclassified';
+  }
+};
 export function CommitRefTooltip({
   className,
   commit,
@@ -26,12 +46,7 @@ export function CommitRefTooltip({
   const triggerClassName = ['git-commit-ref-trigger', className].filter(Boolean).join(' ');
   const trigger =
     linkTrigger && commit.webUrl ? (
-      <a
-        className={triggerClassName}
-        href={commit.webUrl}
-        rel="noreferrer"
-        target="_blank"
-      />
+      <a className={triggerClassName} href={commit.webUrl} rel="noreferrer" target="_blank" />
     ) : (
       <span className={triggerClassName} tabIndex={focusable ? 0 : -1} />
     );
@@ -49,6 +64,14 @@ export function CommitRefTooltip({
           <Tooltip.Popup className="git-commit-tooltip">
             <strong>{commit.subject || 'Commit'}</strong>
             <code className="git-commit-tooltip-sha">{commit.sha}</code>
+            {commit.versionCommitKind ? (
+              <span
+                className={`version-commit-kind-pill ${commit.versionCommitKind}`}
+                title={`Commit kind: ${versionCommitKindLabel(commit.versionCommitKind)}`}
+              >
+                {versionCommitKindLabel(commit.versionCommitKind)}
+              </span>
+            ) : null}
             {commit.authorName || authoredLabel ? (
               <span className="git-commit-tooltip-meta">
                 {[commit.authorName, authoredLabel].filter(Boolean).join(' · ')}

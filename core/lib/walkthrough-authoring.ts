@@ -26,19 +26,19 @@ import {
   string,
   union,
 } from 'valibot';
-import {
-  getSectionWalkthroughHunks,
-  isGeneratedWalkthroughPath,
-} from './narrative-walkthrough-diff.js';
 import type {
   ChangedFile,
   DiffSection,
   NarrativeWalkthrough,
   RepositoryState,
+  VersionCommitKind,
   WalkthroughCommentReference,
   WalkthroughHunk,
 } from '../types.ts';
-
+import {
+  getSectionWalkthroughHunks,
+  isGeneratedWalkthroughPath,
+} from './narrative-walkthrough-diff.js';
 
 export const maxProseChars = 4000;
 export const maxPatchExcerpt = 2500;
@@ -277,7 +277,11 @@ const compactNullableGroup = (group: {
   title?: string | null;
 }) => ({
   ...(group.changeType
-    ? { changeType: group.changeType as NonNullable<WalkthroughDraft['chapters'][number]['stops'][number]['changeType']> }
+    ? {
+        changeType: group.changeType as NonNullable<
+          WalkthroughDraft['chapters'][number]['stops'][number]['changeType']
+        >,
+      }
     : {}),
   ...(group.commitNote ? { commitNote: group.commitNote } : {}),
   hunkIds: [...group.hunkIds],
@@ -367,7 +371,6 @@ export type WalkthroughReviewStrategy =
       mode: 'whole-diff' | 'whole-mr';
       reason: string;
     };
-
 
 type IndexedHunk = WalkthroughHunk & {
   sectionId: string;
@@ -477,7 +480,11 @@ export const normalizeWalkthroughDraft = (
   const used = new Set<string>();
   const itemIds = new Set<string>();
 
-  const resolveGroup = (group: WalkthroughDraft["chapters"][number]["stops"][number] | NonNullable<WalkthroughDraft["support"]>[number]) => {
+  const resolveGroup = (
+    group:
+      | WalkthroughDraft['chapters'][number]['stops'][number]
+      | NonNullable<WalkthroughDraft['support']>[number],
+  ) => {
     if (itemIds.has(group.id)) {
       return null;
     }
@@ -500,8 +507,12 @@ export const normalizeWalkthroughDraft = (
     return {
       ...counts,
       ...(group.changeType
-    ? { changeType: group.changeType as NonNullable<WalkthroughDraft['chapters'][number]['stops'][number]['changeType']> }
-    : {}),
+        ? {
+            changeType: group.changeType as NonNullable<
+              WalkthroughDraft['chapters'][number]['stops'][number]['changeType']
+            >,
+          }
+        : {}),
       ...(group.commitNote ? { commitNote: clean(group.commitNote) } : {}),
       hunkIds,
       hunks,
@@ -1034,24 +1045,21 @@ Repository digest:
 ${JSON.stringify(digest)}`;
 };
 
-
-
 /** @deprecated Prefer normalizeWalkthroughDraft. */
 export const normalizeAuthoredWalkthrough = normalizeWalkthroughDraft;
 
 export type UnitWalkthroughEntry = {
   context:
     | {
-        kind: 'mr-commit';
         commit: {
           sha: string;
           shortSha: string;
           subject: string;
           webUrl?: string;
         };
+        kind: 'mr-commit';
       }
     | {
-        kind: 'version-commit';
         after?: {
           sha: string;
           shortSha: string;
@@ -1065,6 +1073,8 @@ export type UnitWalkthroughEntry = {
           webUrl?: string;
         };
         commentReferences?: ReadonlyArray<WalkthroughCommentReference>;
+        evolutionKind?: 'likely-revised' | 'added' | 'removed' | 'ambiguous';
+        kind: 'version-commit';
         range: { fromLabel: string; toLabel: string };
         rebaseDrivers?: ReadonlyArray<{
           authoredAt?: string;
@@ -1080,17 +1090,71 @@ export type UnitWalkthroughEntry = {
   state: RepositoryState;
   walkthrough: NarrativeWalkthrough | null;
 };
+const versionCommitOverviewKindLabel = (
+  kind: Extract<UnitWalkthroughEntry['context'], { kind: 'version-commit' }>['evolutionKind'],
+) => {
+  switch (kind) {
+    case 'added':
+      return 'added';
+    case 'removed':
+      return 'removed';
+    case 'likely-revised':
+      return 'revised';
+    default:
+      return 'unclassified';
+  }
+};
 
+const toVersionCommitKind = (
+  kind: NonNullable<
+    Extract<UnitWalkthroughEntry['context'], { kind: 'version-commit' }>['evolutionKind']
+  >,
+): VersionCommitKind =>
+  kind === 'added' ? 'introduced' : kind === 'likely-revised' ? 'revised' : kind;
+
+/** Build the focused cross-commit summary that appears above a unit walkthrough. */
+export const buildVersionCommitOverviewPrompt = ({
+  entries,
+  range,
+}: {
+  entries: ReadonlyArray<UnitWalkthroughEntry>;
+  range: { fromLabel: string; toLabel: string };
+}) => {
+  const commits = entries.flatMap((entry) => {
+    if (entry.context.kind !== 'version-commit') {
+      return [];
+    }
+    const { after, before, evolutionKind } = entry.context;
+    return [
+      {
+        earlierCommit: before ? `${before.shortSha}: ${before.subject}` : null,
+        kind: versionCommitOverviewKindLabel(evolutionKind),
+        laterCommit: after ? `${after.shortSha}: ${after.subject}` : null,
+        unitFocus: entry.walkthrough?.focus ?? null,
+      },
+    ];
+  });
+  return `Write the Review focus for a commit-by-commit version comparison from ${range.fromLabel} to ${range.toLabel}.
+
+> Scope is strictly the changes since ${range.fromLabel}, through ${range.toLabel}. Frame every statement as a change that occurred after the earlier selected version. Do not summarize the merge request as a whole, describe behavior already present in ${range.fromLabel} as newly introduced, or infer changes outside this version window.
+
+> The reviewer needs a concise, evidence-based overview of the various changed commits before following the detailed walkthrough. Synthesize the supplied unit summaries; do not merely count commits or repeat their subjects. Mention each commit's kind (added, removed, revised, or unclassified) when it clarifies what changed. Do not describe pure rebase noise as new behavior. Use 2-4 short sentences, no heading or list.
+
+> Commit context (ordered):
+${JSON.stringify(commits)}`;
+};
 /**
  * Deterministically compose completed unit walkthroughs into one narrative.
  */
 export const composeUnitWalkthroughs = ({
   agent,
   entries,
+  focus,
   state,
 }: {
   agent: NarrativeWalkthrough['agent'];
   entries: ReadonlyArray<UnitWalkthroughEntry>;
+  focus?: string;
   state: RepositoryState;
 }): NarrativeWalkthrough => {
   const chapters = entries.flatMap((entry) => {
@@ -1113,6 +1177,11 @@ export const composeUnitWalkthroughs = ({
               shortSha: summary.shortSha,
               subject: summary.subject,
               webUrl: summary.webUrl,
+              ...(context.kind === 'version-commit' &&
+              context.evolutionKind &&
+              context.after?.sha === summary.sha
+                ? { versionCommitKind: toVersionCommitKind(context.evolutionKind) }
+                : {}),
               ...(rebaseDrivers.length > 0
                 ? {
                     rebaseDrivers: rebaseDrivers.map((driver) => ({
@@ -1139,9 +1208,12 @@ export const composeUnitWalkthroughs = ({
     agent,
     chapters,
     commitFiles: entries.flatMap((entry) => entry.state.files),
-    focus: isVersionComparison
-      ? `Review ${entries.length} changed commit units in stack order.`
-      : `Review ${entries.length} commits in topological order, from oldest to newest.`,
+    focus: clean(
+      focus ?? '',
+      isVersionComparison
+        ? `Review ${entries.length} changed commit units in stack order.`
+        : `Review ${entries.length} commits in topological order, from oldest to newest.`,
+    ),
     generatedAt: new Date().toISOString(),
     kind: 'narrative',
     repo: { branch: state.branch, root: state.root },

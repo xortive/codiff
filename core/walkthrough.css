@@ -91,14 +91,8 @@
   white-space: nowrap;
 }
 .wt-commit-evolution-indicator {
-  font-weight: 700;
   flex-shrink: 0;
 }
-.wt-commit-evolution-indicator.evolution-added { color: var(--diff-addition); }
-.wt-commit-evolution-indicator.evolution-removed { color: var(--diff-deletion); }
-.wt-commit-evolution-indicator.evolution-revised { color: #d9962f; }
-.wt-commit-evolution-indicator.evolution-ambiguous { color: var(--muted); }
-.wt-commit-evolution-indicator.evolution-unchanged { color: var(--muted); }
 .wt-toc-chapter-head {
   align-items: center;
   display: grid;
@@ -401,11 +395,24 @@
   border-radius: 4px;
   padding: 8px 10px;
 }
-.wt-comment-reference.resolved-by-change { border-left-color: var(--addition); }
-.wt-comment-reference > div { align-items: baseline; display: flex; gap: 8px; justify-content: space-between; }
+.wt-comment-reference.resolved-by-change {
+  border-left-color: var(--addition);
+}
+.wt-comment-reference > div {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
 .wt-comment-reference a,
-.wt-comment-reference strong { color: var(--text); font: 600 12px/1.35 var(--font-sans); }
-.wt-comment-reference span { color: var(--muted); font: 11px/1.35 var(--font-sans); }
+.wt-comment-reference strong {
+  color: var(--text);
+  font: 600 12px/1.35 var(--font-sans);
+}
+.wt-comment-reference span {
+  color: var(--muted);
+  font: 11px/1.35 var(--font-sans);
+}
 .wt-comment-reference blockquote {
   color: var(--muted);
   font: 12px/1.45 var(--font-sans);
@@ -433,11 +440,16 @@
 /* ---- Variation C — hybrid arc timeline ------------------------------------ */
 .wt-hybrid {
   display: flex;
+  flex: 1;
   flex-direction: column;
   height: 100%;
   min-height: 0;
   min-width: 0;
   width: 100%;
+}
+
+.codiff-web-review > .wt-arc {
+  order: -1;
 }
 .wt-arc {
   align-items: center;

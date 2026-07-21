@@ -1480,20 +1480,37 @@ html[data-codiff-platform='darwin'] .sidebar {
 .version-commit-unit > span:nth-child(3) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .version-commit-unit.unchanged { opacity: 0.5; }
 .version-commit-unit.unchanged:not(:disabled):hover { opacity: 0.8; }
-.version-commit-kind { font-weight: 700; }
-.version-commit-kind.added { color: var(--diff-addition); }
-.version-commit-kind.removed { color: var(--diff-deletion); }
-.version-commit-kind.likely-revised,
-.version-commit-kind.revised {
+.version-commit-kind-pill {
+  align-items: center;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 32%, transparent);
+  border-radius: 999px;
+  color: var(--muted);
+  display: inline-flex;
+  font: 700 9px/1 var(--font-sans);
+  justify-self: start;
+  letter-spacing: 0.01em;
+  padding: 3px 5px;
+  white-space: nowrap;
+}
+
+.version-commit-kind-pill.added,
+.version-commit-kind-pill.introduced {
+  color: var(--diff-addition);
+}
+.version-commit-kind-pill.removed {
+  color: var(--diff-deletion);
+}
+.version-commit-kind-pill.likely-revised,
+.version-commit-kind-pill.revised {
   color: #d9962f;
 }
 
-.version-commit-kind.introduced {
-  color: #3f9a5a;
+.version-commit-kind-pill.absorbed-into-base,
+.version-commit-kind-pill.ambiguous,
+.version-commit-kind-pill.unchanged {
+  color: var(--muted);
 }
-.version-commit-kind.absorbed-into-base { color: var(--muted); }
-.version-commit-kind.ambiguous { color: var(--muted); }
-.version-commit-kind.unchanged { color: var(--muted); }
 .version-commit-unit-block { display: grid; gap: 1px; }
 .version-commit-rebase-drivers {
   display: grid;

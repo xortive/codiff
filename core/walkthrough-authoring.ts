@@ -1,6 +1,7 @@
 export {
   attachVersionCommentReferences,
   buildWalkthroughPrompt,
+  buildVersionCommitOverviewPrompt,
   buildWalkthroughPromptInput,
   combineCommitWalkthroughs,
   composeUnitWalkthroughs,
@@ -34,4 +35,5 @@ export {
   type GenerateReviewWalkthroughResult,
   type ReviewWalkthroughModelResult,
   type ReviewWalkthroughRunModel,
+  type ReviewWalkthroughRunOverviewModel,
 } from './lib/generate-review-walkthrough.ts';

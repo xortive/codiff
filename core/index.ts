@@ -46,6 +46,7 @@ export {
   type GenerateReviewWalkthroughResult,
   type ReviewWalkthroughModelResult,
   type ReviewWalkthroughRunModel,
+  type ReviewWalkthroughRunOverviewModel,
 } from './lib/generate-review-walkthrough.ts';
 export {
   parsePlanShareManifest,
@@ -94,6 +95,7 @@ export type {
   ReviewStructureRecommendation,
   ReviewUnit,
   ReviewVersionOption,
+  VersionCommitKind,
   RepositoryState,
   ReviewSource,
   RevisionLabel,
@@ -103,6 +105,8 @@ export type {
   SharedPlanSnapshot,
   SharedWalkthroughSnapshot,
   WalkthroughCommentReference,
+  WalkthroughGenerationProgress,
+  WalkthroughGenerationUnitProgress,
   WalkthroughGenerationInput,
   WalkthroughShareManifestV1,
   WalkthroughHunk,

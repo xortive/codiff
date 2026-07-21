@@ -10,7 +10,7 @@ import {
   type WalkthroughStopView,
 } from '../../../lib/narrative-walkthrough.ts';
 import type { ChangedFile, NarrativeWalkthrough } from '../../../types.ts';
-import { CommitRefTooltip } from '../CommitRefTooltip.tsx';
+import { CommitRefTooltip, versionCommitKindLabel } from '../CommitRefTooltip.tsx';
 import { ArrowsClockwise, Check, GitBranch, Path, ShareNetwork } from './icons.tsx';
 import { ChapterIcon } from './parts.tsx';
 import type { NarrativeNavigation } from './useNarrativeNavigation.ts';
@@ -218,22 +218,18 @@ const commitEvolutionKindClass = (kind: string | undefined) => {
   }
 };
 
-const commitEvolutionSymbol = (kind: string | undefined) => {
+const toVersionCommitKind = (kind: string | undefined) => {
   switch (kind) {
-    case 'added':
     case 'introduced':
-      return '+';
     case 'removed':
-      return '−';
-    case 'likely-revised':
     case 'revised':
-      return '~';
+    case 'retained':
+    case 'rewritten-same-patch':
     case 'absorbed-into-base':
-      return '↳';
     case 'ambiguous':
-      return '?';
+      return kind;
     default:
-      return '·';
+      return undefined;
   }
 };
 
@@ -302,52 +298,61 @@ export function NarrativeSidebar({
             className={`wt-toc-chapter${chapter.commit ? ' commit-boundary' : ''}`}
             key={chapter.id}
           >
-            {chapter.commit ? (
-              <div
-                className={`wt-commit-boundary-label${commitEvolutionKinds ? ` ${commitEvolutionKindClass(commitEvolutionKinds.get(chapter.commit.sha))}` : ''}`}
-                title={[
-                  `${chapter.commit.shortSha} ${chapter.commit.subject}`,
-                  ...(chapter.commit.rebaseDrivers ?? []).map(
-                    (driver) => `${driver.shortSha} ${driver.subject}`,
-                  ),
-                  chapter.commit.revisionCause,
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
-              >
-                {commitEvolutionKinds ? (
-                  <span
-                    className={`wt-commit-evolution-indicator ${commitEvolutionKindClass(commitEvolutionKinds.get(chapter.commit.sha))}`}
-                  >
-                    {commitEvolutionSymbol(commitEvolutionKinds.get(chapter.commit.sha))}
-                  </span>
-                ) : null}
-                <CommitRefTooltip
-                  commit={{
-                    sha: chapter.commit.gitSha ?? chapter.commit.sha,
-                    shortSha: chapter.commit.shortSha,
-                    subject: chapter.commit.subject,
-                    webUrl: chapter.commit.webUrl,
-                  }}
-                />
-                <span className="wt-commit-boundary-subject">{chapter.commit.subject}</span>
-                {(chapter.commit.rebaseDrivers?.length ?? 0) > 0 ? (
-                  <span
-                    aria-label={`Revised due to rebase: ${chapter.commit.rebaseDrivers
-                      ?.map((driver) => `${driver.shortSha} ${driver.subject}`)
-                      .join('; ')}`}
-                    className="wt-commit-rebase-badge"
-                    tabIndex={0}
-                  >
-                    Revised due to rebase
-                  </span>
-                ) : chapter.commit.revisionCause ? (
-                  <span className="wt-commit-rebase-badge" title={chapter.commit.revisionCause}>
-                    Revised due to rebase
-                  </span>
-                ) : null}
-              </div>
-            ) : null}
+            {chapter.commit
+              ? (() => {
+                  const versionCommitKind =
+                    chapter.commit.versionCommitKind ??
+                    toVersionCommitKind(commitEvolutionKinds?.get(chapter.commit.sha));
+                  return (
+                    <div
+                      className={`wt-commit-boundary-label${commitEvolutionKinds ? ` ${commitEvolutionKindClass(commitEvolutionKinds.get(chapter.commit.sha))}` : ''}`}
+                      title={[
+                        `${chapter.commit.shortSha} ${chapter.commit.subject}`,
+                        ...(chapter.commit.rebaseDrivers ?? []).map(
+                          (driver) => `${driver.shortSha} ${driver.subject}`,
+                        ),
+                        chapter.commit.revisionCause,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    >
+                      {versionCommitKind ? (
+                        <span className={`version-commit-kind-pill ${versionCommitKind}`}>
+                          {versionCommitKindLabel(versionCommitKind)}
+                        </span>
+                      ) : null}
+                      <CommitRefTooltip
+                        commit={{
+                          sha: chapter.commit.gitSha ?? chapter.commit.sha,
+                          shortSha: chapter.commit.shortSha,
+                          subject: chapter.commit.subject,
+                          versionCommitKind: chapter.commit.versionCommitKind,
+                          webUrl: chapter.commit.webUrl,
+                        }}
+                      />
+                      <span className="wt-commit-boundary-subject">{chapter.commit.subject}</span>
+                      {(chapter.commit.rebaseDrivers?.length ?? 0) > 0 ? (
+                        <span
+                          aria-label={`Revised due to rebase: ${chapter.commit.rebaseDrivers
+                            ?.map((driver) => `${driver.shortSha} ${driver.subject}`)
+                            .join('; ')}`}
+                          className="wt-commit-rebase-badge"
+                          tabIndex={0}
+                        >
+                          Revised due to rebase
+                        </span>
+                      ) : chapter.commit.revisionCause ? (
+                        <span
+                          className="wt-commit-rebase-badge"
+                          title={chapter.commit.revisionCause}
+                        >
+                          Revised due to rebase
+                        </span>
+                      ) : null}
+                    </div>
+                  );
+                })()
+              : null}
             <div className="wt-toc-chapter-head">
               <span className="wt-toc-chapter-icon">
                 <ChapterIcon icon={chapter.icon} size={15} />

@@ -1,6 +1,7 @@
 import { expect, test } from 'vite-plus/test';
 import {
   attachVersionCommentReferences,
+  buildVersionCommitOverviewPrompt,
   buildWalkthroughPrompt,
   buildWalkthroughPromptInput,
   composeUnitWalkthroughs,
@@ -279,6 +280,28 @@ test('includes version-commit guidance and composes unit walkthroughs', () => {
   expect(composed.chapters[0]?.id.startsWith('unit-1:')).toBe(true);
   expect(composed.commitFiles?.length).toBe(1);
   expect(composed.title).toContain('v1');
+});
+
+test('scopes version-comparison Review focus to changes since the earlier version', () => {
+  const overviewPrompt = buildVersionCommitOverviewPrompt({
+    entries: [
+      {
+        context: {
+          after: { shortSha: 'bbbbbbb', subject: 'Later' },
+          evolutionKind: 'added',
+          kind: 'version-commit',
+          range: { fromLabel: 'v1', toLabel: 'v2' },
+          unitId: 'unit-1',
+        },
+        state,
+        walkthrough: null,
+      },
+    ],
+    range: { fromLabel: 'v1', toLabel: 'v2' },
+  });
+  expect(overviewPrompt).toContain('strictly the changes since v1, through v2');
+  expect(overviewPrompt).toContain('Do not summarize the merge request as a whole');
+  expect(overviewPrompt).toContain('behavior already present in v1 as newly introduced');
 });
 
 test('exposes prompt digest sizing and patch budgets', () => {
