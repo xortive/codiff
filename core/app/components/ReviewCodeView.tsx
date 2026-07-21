@@ -943,6 +943,7 @@ function SourceDescriptionBody({
 export function PullRequestSourceDescription({
   actions,
   footer,
+  footerAside,
   keymap,
   onUpdateDescription,
   onUpdateTitle,
@@ -951,6 +952,7 @@ export function PullRequestSourceDescription({
 }: {
   actions?: ReactNode;
   footer?: ReactNode;
+  footerAside?: ReactNode;
   keymap?: CodiffKeymap;
   onUpdateDescription?: (body: string) => Promise<void> | void;
   onUpdateTitle?: (title: string) => Promise<void> | void;
@@ -972,6 +974,25 @@ export function PullRequestSourceDescription({
 
   const isCollapsed = (!sourceDescriptionHasBody && !canEditDescription) || collapsed;
   const layoutKey = `source-description-panel:${source.provider ?? ''}:${source.url}:${sourceTitle}:${sourceDescription}:${source.author?.login ?? ''}:${source.author?.avatarUrl ?? ''}:${isCollapsed ? 'collapsed' : 'open'}`;
+  const sourceDescriptionContent = (
+    <SourceDescriptionBody
+      author={sourceAuthor}
+      canEdit={canEditDescription}
+      description={sourceDescription}
+      keymap={keymap}
+      layoutKey={layoutKey}
+      onLayoutReady={() => {}}
+      onUpdateDescription={onUpdateDescription}
+      onUploadDescriptionAsset={onUploadDescriptionAsset}
+    />
+  );
+  const overviewAside =
+    footer || footerAside ? (
+      <aside className="codiff-source-description-overview-aside">
+        {footer}
+        {footerAside}
+      </aside>
+    ) : null;
 
   return (
     <div className="codiff-source-description-panel">
@@ -987,17 +1008,19 @@ export function PullRequestSourceDescription({
       />
       {!isCollapsed ? (
         <div className="codiff-source-description-panel-body">
-          <SourceDescriptionBody
-            author={sourceAuthor}
-            canEdit={canEditDescription}
-            description={sourceDescription}
-            keymap={keymap}
-            layoutKey={layoutKey}
-            onLayoutReady={() => {}}
-            onUpdateDescription={onUpdateDescription}
-            onUploadDescriptionAsset={onUploadDescriptionAsset}
-          />
-          {footer ? <div className="codiff-source-description-footer">{footer}</div> : null}
+          {overviewAside ? (
+            <div className="codiff-source-description-overview">
+              <div className="codiff-source-description-overview-main">
+                {sourceDescriptionContent}
+              </div>
+              {overviewAside}
+            </div>
+          ) : (
+            <>
+              {sourceDescriptionContent}
+              {footer ? <div className="codiff-source-description-footer">{footer}</div> : null}
+            </>
+          )}
         </div>
       ) : null}
     </div>
@@ -2486,6 +2509,7 @@ export function ReviewCodeView({
   source,
   sourceDescriptionActions,
   sourceDescriptionFooter,
+  sourceDescriptionFooterAside,
   supportsReviewCommentActions,
   theme = 'system',
   viewed,
@@ -2546,6 +2570,7 @@ export function ReviewCodeView({
   source: ReviewSource;
   sourceDescriptionActions?: ReactNode;
   sourceDescriptionFooter?: ReactNode;
+  sourceDescriptionFooterAside?: ReactNode;
   supportsReviewCommentActions: boolean;
   theme?: CodiffPreferences['theme'];
   viewed: Record<string, string>;
@@ -3802,20 +3827,44 @@ export function ReviewCodeView({
         {!sourceDescriptionCollapsed &&
         (sourceDescriptionHasContent || canEditSourceDescription) ? (
           <div className="codiff-source-description-panel-body">
-            <SourceDescriptionBody
-              ariaLabel={sourceDescriptionAriaLabel}
-              author={sourceAuthor}
-              canEdit={canEditSourceDescription}
-              description={sourceDescription}
-              keymap={keymap}
-              layoutKey="code-view-header"
-              onLayoutReady={noopLayoutReady}
-              onUpdateDescription={onUpdateSourceDescription}
-              onUploadDescriptionAsset={onUploadSourceDescriptionAsset}
-            />
-            {sourceDescriptionFooter ? (
-              <div className="codiff-source-description-footer">{sourceDescriptionFooter}</div>
-            ) : null}
+            {sourceDescriptionFooter || sourceDescriptionFooterAside ? (
+              <div className="codiff-source-description-overview">
+                <div className="codiff-source-description-overview-main">
+                  <SourceDescriptionBody
+                    ariaLabel={sourceDescriptionAriaLabel}
+                    author={sourceAuthor}
+                    canEdit={canEditSourceDescription}
+                    description={sourceDescription}
+                    keymap={keymap}
+                    layoutKey="code-view-header"
+                    onLayoutReady={noopLayoutReady}
+                    onUpdateDescription={onUpdateSourceDescription}
+                    onUploadDescriptionAsset={onUploadSourceDescriptionAsset}
+                  />
+                </div>
+                <aside className="codiff-source-description-overview-aside">
+                  {sourceDescriptionFooter}
+                  {sourceDescriptionFooterAside}
+                </aside>
+              </div>
+            ) : (
+              <>
+                <SourceDescriptionBody
+                  ariaLabel={sourceDescriptionAriaLabel}
+                  author={sourceAuthor}
+                  canEdit={canEditSourceDescription}
+                  description={sourceDescription}
+                  keymap={keymap}
+                  layoutKey="code-view-header"
+                  onLayoutReady={noopLayoutReady}
+                  onUpdateDescription={onUpdateSourceDescription}
+                  onUploadDescriptionAsset={onUploadSourceDescriptionAsset}
+                />
+                {sourceDescriptionFooter ? (
+                  <div className="codiff-source-description-footer">{sourceDescriptionFooter}</div>
+                ) : null}
+              </>
+            )}
           </div>
         ) : null}
       </div>
@@ -3833,6 +3882,7 @@ export function ReviewCodeView({
       sourceDescriptionAriaLabel,
       sourceDescriptionCollapsed,
       sourceDescriptionFooter,
+      sourceDescriptionFooterAside,
       sourceDescriptionHasContent,
       sourceDescriptionLabel,
       sourceTitle,

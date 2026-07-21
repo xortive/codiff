@@ -840,20 +840,12 @@ export function ReviewSurface({
         onMergePullRequest={mergePullRequest}
       />
     ) : undefined;
-  const sourceDescriptionFooter =
-    sourceDescriptionFooterMain && sourceDescriptionFooterAside ? (
-      <div className="codiff-source-description-footer-row">
-        <div className="codiff-source-description-footer-main">{sourceDescriptionFooterMain}</div>
-        <div className="codiff-source-description-footer-aside">{sourceDescriptionFooterAside}</div>
-      </div>
-    ) : (
-      (sourceDescriptionFooterMain ?? sourceDescriptionFooterAside)
-    );
   const sourceDescription =
     source.type === 'pull-request' ? (
       <PullRequestSourceDescription
         actions={sourceDescriptionActions}
-        footer={sourceDescriptionFooter}
+        footer={sourceDescriptionFooterMain}
+        footerAside={sourceDescriptionFooterAside}
         keymap={keymap}
         onUpdateDescription={interactive?.onUpdateDescription}
         onUpdateTitle={interactive?.onUpdateTitle}
@@ -875,7 +867,8 @@ export function ReviewSurface({
         reviewProps={commonReviewProps}
         scrollTarget={blockScrollTarget}
         sourceDescriptionActions={sourceDescriptionActions}
-        sourceDescriptionFooter={sourceDescriptionFooter}
+        sourceDescriptionFooter={sourceDescriptionFooterMain}
+        sourceDescriptionFooterAside={sourceDescriptionFooterAside}
       />
     );
   };
@@ -1158,7 +1151,8 @@ export function ReviewSurface({
               scrollTarget={treeScrollTarget}
               selectedPath={visibleSelectedPath}
               sourceDescriptionActions={sourceDescriptionActions}
-              sourceDescriptionFooter={sourceDescriptionFooter}
+              sourceDescriptionFooter={sourceDescriptionFooterMain}
+              sourceDescriptionFooterAside={sourceDescriptionFooterAside}
               walkthroughNotes={emptyWalkthroughNotes}
             />
           )
