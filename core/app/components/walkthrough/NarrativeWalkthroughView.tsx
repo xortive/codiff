@@ -663,21 +663,26 @@ export function NarrativeWalkthroughView({
         }
     : null;
 
+  const arc = (
+    <Arc
+      committable={committable}
+      navigation={navigation}
+      onShareWalkthrough={onShareWalkthrough}
+      shareWalkthroughDisabled={shareWalkthroughDisabled}
+      supportAvailable={supportAvailable}
+      walkthroughView={walkthroughView}
+    />
+  );
+
   return (
-    <div
-      className="wt-hybrid"
-      onPointerDownCapture={navigation.releaseStopScrollLock}
-      onTouchStartCapture={navigation.releaseStopScrollLock}
-      onWheelCapture={navigation.releaseStopScrollLock}
-    >
-      <Arc
-        committable={committable}
-        navigation={navigation}
-        onShareWalkthrough={onShareWalkthrough}
-        shareWalkthroughDisabled={shareWalkthroughDisabled}
-        supportAvailable={supportAvailable}
-        walkthroughView={walkthroughView}
-      />
+    <>
+      {arc}
+      <div
+        className="wt-hybrid"
+        onPointerDownCapture={navigation.releaseStopScrollLock}
+        onTouchStartCapture={navigation.releaseStopScrollLock}
+        onWheelCapture={navigation.releaseStopScrollLock}
+      >
 
       {navigation.mode === 'commit' ? (
         <CommitView
@@ -782,7 +787,8 @@ export function NarrativeWalkthroughView({
             <span className="wt-upnext-file">Chapter {navigation.index + 1}</span>
           </span>
         </button>
-      ) : null}
-    </div>
+        ) : null}
+      </div>
+    </>
   );
 }
