@@ -835,6 +835,8 @@ a.review-top-bar-source:focus-visible {
   align-items: center;
   display: flex;
   flex: none;
+  height: 30px;
+  justify-content: center;
   width: auto;
 }
 
@@ -910,6 +912,12 @@ a.review-top-bar-source:focus-visible {
   width: 6px;
 }
 
+.app-shell > .sidebar,
+.app-shell > .sidebar-resizer,
+.app-shell > .review {
+  grid-row: 2;
+}
+
 .sidebar-toggle-button {
   -webkit-app-region: no-drag;
   align-items: center;
@@ -946,12 +954,6 @@ a.review-top-bar-source:focus-visible {
   position: relative;
   user-select: none;
   z-index: 21;
-}
-
-.app-shell > .sidebar,
-.app-shell > .sidebar-resizer,
-.app-shell > .review {
-  grid-row: 2;
 }
 
 .sidebar-resizer::before {
@@ -1225,6 +1227,35 @@ html[data-codiff-platform='darwin'] .sidebar {
   background: var(--sidebar-vibrancy-tint);
 }
 
+.sidebar-header {
+  -webkit-app-region: drag;
+  border-bottom: 1px solid var(--sidebar-border);
+  flex: none;
+  min-width: 0;
+  padding: 0 14px;
+}
+
+.sidebar-path-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-height: 38px;
+  min-width: 0;
+  padding-left: 64px;
+}
+
+.app-shell.window-fullscreen .sidebar-path-row {
+  padding-left: 0;
+}
+
+.share-shell .sidebar-path-row {
+  padding-left: 0;
+}
+
+.merge-request-shell .sidebar-path-row {
+  gap: 6px;
+}
+
 .merge-request-nav-button {
   align-items: center;
   background: transparent;
@@ -1238,7 +1269,452 @@ html[data-codiff-platform='darwin'] .sidebar {
   justify-content: center;
   padding: 0;
   text-decoration: none;
-  width: 28px;
+  min-width: 28px;
+}
+.sidebar-version-compare-button {
+  padding-inline: 8px;
+  width: auto;
+}
+
+.version-comparison-section {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 12px;
+}
+
+.version-picker-pair {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.version-picker {
+  min-width: 0;
+  position: relative;
+}
+
+.version-picker-label {
+  color: var(--muted);
+  display: block;
+  font: 10px/1.35 var(--font-mono);
+  margin-bottom: 3px;
+  text-transform: uppercase;
+}
+
+.version-picker-trigger {
+  align-items: center;
+  background: rgb(127 127 127 / 0.08);
+  border: 1px solid rgb(127 127 127 / 0.18);
+  border-radius: 6px;
+  color: var(--sidebar-text);
+  cursor: pointer;
+  display: flex;
+  font: 12px/1.35 var(--font-mono);
+  justify-content: space-between;
+  min-width: 0;
+  padding: 5px 7px;
+  width: 100%;
+}
+
+.version-picker-trigger > *:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.version-picker-positioner {
+  /* Base UI renders this in a portal, outside the sidebar's clipping context. */
+  z-index: 1000;
+}
+
+.version-picker-popover {
+  background: var(--code-bg);
+  border: 1px solid rgb(127 127 127 / 0.25);
+  border-radius: 7px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.25);
+  max-height: min(320px, 55vh);
+  min-width: min(560px, calc(100vw - 32px));
+  overflow: auto;
+  padding: 3px;
+}
+
+.version-picker-popover [role='listbox'] {
+  display: grid;
+}
+
+.version-picker-option {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--sidebar-text);
+  cursor: pointer;
+  display: grid;
+  font: 11px/1.5 var(--font-mono);
+  gap: 5px;
+  grid-template-columns: 32px 36px minmax(54px, 1fr) auto auto auto minmax(110px, auto);
+  min-width: 0;
+  padding: 4px 5px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.version-picker-option:hover,
+.version-picker-option[data-highlighted],
+.version-picker-option[data-selected] {
+  background: rgb(127 127 127 / 0.14);
+}
+
+.version-picker-option[data-disabled] {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.version-picker-option code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.version-comparison-status {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font: 11px/1.4 var(--font-mono);
+  gap: 6px;
+  min-height: 24px;
+}
+
+.version-comparison-status.error {
+  color: var(--danger);
+}
+
+.version-comparison-spinner {
+  animation: version-comparison-spin 0.8s linear infinite;
+  border: 2px solid rgb(127 127 127 / 0.25);
+  border-radius: 50%;
+  border-top-color: var(--sidebar-text);
+  height: 12px;
+  width: 12px;
+}
+
+@keyframes version-comparison-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.version-picker-head {
+  color: var(--accent, var(--sidebar-text));
+  font-weight: 700;
+}
+.version-picker-additions {
+  color: var(--diff-addition);
+}
+.version-picker-deletions {
+  color: var(--diff-deletion);
+}
+.version-picker-timing {
+  color: var(--muted);
+}
+
+.version-base-movement,
+.version-commit-evolution,
+.version-walkthrough-structure,
+.version-unit-scope {
+  background: rgb(127 127 127 / 0.06);
+  border: 1px solid rgb(127 127 127 / 0.14);
+  border-radius: 7px;
+  color: var(--sidebar-text);
+  font: 11px/1.45 var(--font-sans);
+  padding: 7px;
+}
+
+.version-base-movement a {
+  color: inherit;
+  font-family: var(--font-mono);
+}
+.version-base-movement-stat,
+.version-base-movement small,
+.version-commit-evolution small,
+.version-walkthrough-structure small {
+  color: var(--muted);
+}
+.version-base-movement-stat {
+  font: 11px/1.45 var(--font-sans);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.version-base-movement small {
+  display: block;
+  margin-top: 3px;
+}
+.version-base-movement-commits {
+  margin-top: 6px;
+}
+.version-base-movement-commits > summary {
+  color: var(--muted);
+  cursor: pointer;
+  font: 11px/1.45 var(--font-sans);
+  letter-spacing: 0;
+  list-style: none;
+  text-transform: none;
+  user-select: none;
+}
+.version-base-movement-commits > summary::-webkit-details-marker {
+  display: none;
+}
+.version-base-movement-commits > summary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 4px;
+  transition: transform 0.12s ease;
+}
+.version-base-movement-commits[open] > summary::before {
+  transform: rotate(90deg);
+}
+.version-base-movement-commit-list {
+  margin-top: 5px;
+  max-height: 220px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+.version-base-movement-commit {
+  color: inherit;
+  font: 11px/1.4 var(--font-sans);
+  letter-spacing: 0;
+  text-decoration: none;
+  text-transform: none;
+}
+.version-base-movement-commit:hover {
+  background: rgb(127 127 127 / 0.14);
+}
+.version-commit-evolution > strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.version-commit-evolution-list {
+  display: grid;
+  gap: 1px;
+}
+.version-commit-unit {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  font: 10px/1.35 var(--font-sans);
+  gap: 5px;
+  grid-template-columns: max-content max-content minmax(0, 1fr);
+  padding: 4px;
+  text-align: left;
+}
+.version-commit-unit:disabled {
+  cursor: default;
+}
+.version-commit-unit:not(:disabled):hover,
+.version-commit-unit[aria-pressed='true'] {
+  background: rgb(127 127 127 / 0.14);
+}
+.version-commit-unit code {
+  font-size: 9px;
+  white-space: nowrap;
+}
+.version-commit-unit > span:nth-child(3) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.version-commit-unit.unchanged {
+  opacity: 0.5;
+}
+.version-commit-unit.unchanged:not(:disabled):hover {
+  opacity: 0.8;
+}
+.version-commit-kind-pill {
+  align-items: center;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 32%, transparent);
+  border-radius: 999px;
+  color: var(--muted);
+  display: inline-flex;
+  font: 700 9px/1 var(--font-sans);
+  justify-self: start;
+  letter-spacing: 0.01em;
+  padding: 3px 5px;
+  white-space: nowrap;
+}
+
+.version-commit-kind-pill.added,
+.version-commit-kind-pill.introduced {
+  color: var(--diff-addition);
+}
+.version-commit-kind-pill.removed {
+  color: var(--diff-deletion);
+}
+.version-commit-kind-pill.likely-revised,
+.version-commit-kind-pill.revised {
+  color: #d9962f;
+}
+
+.version-commit-kind-pill.absorbed-into-base,
+.version-commit-kind-pill.ambiguous,
+.version-commit-kind-pill.unchanged {
+  color: var(--muted);
+}
+.version-commit-unit-block {
+  display: grid;
+  gap: 1px;
+}
+.version-commit-rebase-drivers {
+  display: grid;
+  gap: 1px;
+  margin: 0 0 2px 12px;
+  padding-left: 6px;
+  border-left: 1px solid rgb(127 127 127 / 0.22);
+}
+.version-commit-rebase-drivers-label {
+  color: var(--muted);
+  font: 9px/1.3 var(--font-sans);
+  padding: 2px 4px 0;
+}
+.version-commit-rebase-drivers .version-commit-unit {
+  opacity: 0.88;
+}
+
+.version-unit-scope {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+.version-unit-scope button {
+  background: transparent;
+  border: 0;
+  color: var(--accent, var(--sidebar-text));
+  cursor: pointer;
+  font-size: 10px;
+}
+.version-tree-commit-scope {
+  border-bottom: 1px solid var(--sidebar-border);
+  display: grid;
+  flex: none;
+  gap: 5px;
+  padding: 6px 8px 8px;
+}
+.version-tree-commit-scope-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+.version-tree-commit-scope-header > span {
+  color: var(--muted);
+  font: 600 10px/1.35 var(--font-sans);
+}
+.version-tree-commit-scope-header button {
+  background: transparent;
+  border: 0;
+  color: var(--accent, var(--sidebar-text));
+  cursor: pointer;
+  font: 10px/1.35 var(--font-sans);
+  padding: 2px 0;
+}
+.version-tree-commit-scope-header button:disabled {
+  color: var(--muted);
+  cursor: default;
+  opacity: 0.55;
+}
+.version-tree-commit-options {
+  display: grid;
+  gap: 1px;
+  max-height: 190px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.version-tree-commit-options label {
+  align-items: center;
+  border-radius: 4px;
+  cursor: pointer;
+  display: grid;
+  font: 10px/1.35 var(--font-sans);
+  gap: 5px;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  min-height: 25px;
+  padding: 3px 4px;
+}
+.version-tree-commit-options label:hover {
+  background: rgb(127 127 127 / 0.1);
+}
+.version-tree-commit-options input {
+  margin: 0;
+}
+.version-tree-commit-options code {
+  font: 9px/1.35 var(--font-mono);
+  white-space: nowrap;
+}
+.version-tree-commit-options span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.version-walkthrough-structure {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+.version-walkthrough-structure label {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+}
+.version-walkthrough-structure .sidebar-version-compare-button {
+  margin-top: 3px;
+}
+
+@media (max-width: 480px) {
+  .version-picker-popover {
+    min-width: calc(100vw - 24px);
+  }
+  .version-picker-option {
+    gap: 3px;
+    grid-template-columns: 29px 31px minmax(44px, 1fr) auto auto auto 24px;
+  }
+  .version-picker-option {
+    grid-template-columns: 29px 31px minmax(44px, 1fr) auto auto auto;
+  }
+  .version-picker-timing {
+    grid-column: 1 / -1;
+    padding-left: 60px;
+  }
+}
+.sidebar-diff-scope-header {
+  align-items: center;
+  display: flex;
+  flex: none;
+  justify-content: space-between;
+  padding: 8px 8px 0;
+}
+
+.sidebar-diff-scope-header > span,
+.sidebar-scope-status {
+  color: var(--muted);
+  font: 10px/1.35 var(--font-mono);
+  text-transform: uppercase;
+}
+
+.sidebar-scope-status {
+  padding: 10px 8px;
+  text-transform: none;
+}
+
+.sidebar-scope-status.error {
+  color: var(--danger);
 }
 
 .merge-request-nav-button:not(.merge-request-home-button):hover {
@@ -1259,11 +1735,113 @@ html[data-codiff-platform='darwin'] .sidebar {
   padding: 18px 14px;
 }
 
+.sidebar-path {
+  color: var(--sidebar-text);
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sidebar-search-row {
   display: grid;
   flex: none;
   gap: 8px;
   padding: 10px 8px;
+}
+
+.sidebar-mode-toggle {
+  border-bottom: 1px solid var(--sidebar-border);
+  display: grid;
+  flex: none;
+  gap: 6px;
+  grid-template-columns: minmax(48px, 0.75fr) minmax(96px, 1.35fr) minmax(68px, 0.9fr);
+  padding: 0 8px;
+}
+
+.share-shell .sidebar-mode-toggle {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.merge-request-shell .sidebar-mode-toggle {
+  grid-template-columns: minmax(42px, 0.65fr) minmax(88px, 1.05fr) minmax(102px, 1.3fr);
+}
+.sidebar-commit-selector {
+  display: grid;
+  flex: none;
+  gap: 4px;
+  padding: 4px 8px 8px;
+}
+
+.sidebar-commit-selector span {
+  color: var(--muted);
+  font: 10px/1 var(--font-mono);
+  text-transform: uppercase;
+}
+
+.sidebar-commit-selector select {
+  min-width: 0;
+  width: 100%;
+}
+
+.sidebar-mode-toggle button {
+  -webkit-app-region: no-drag;
+  background: transparent;
+  border: 0;
+  border-radius: 24px 24px 0 0;
+  color: var(--muted);
+  corner-shape: squircle;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 5px;
+  font: 600 12px/1.35 var(--font-sans);
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 0 8px;
+}
+
+.sidebar-mode-toggle button span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-tab-count {
+  background: rgb(127 127 127 / 0.16);
+  border-radius: 999px;
+  color: var(--muted);
+  flex: none;
+  font: 700 10px/1 var(--font-mono);
+  min-width: 16px;
+  padding: 3px 5px;
+  text-align: center;
+}
+
+.sidebar-mode-toggle button[aria-selected='true'] .sidebar-tab-count {
+  background: rgb(127 127 127 / 0.22);
+  color: var(--sidebar-text);
+}
+
+.sidebar-mode-toggle button:hover:not(:disabled) {
+  background: rgb(127 127 127 / 0.1);
+  color: var(--sidebar-text);
+}
+
+.sidebar-mode-toggle button[aria-selected='true'] {
+  background: rgb(127 127 127 / 0.14);
+  color: var(--sidebar-text);
+}
+
+.sidebar-mode-toggle button:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .sidebar-settings-bar {
@@ -1403,6 +1981,286 @@ html[data-codiff-platform='darwin'] .sidebar {
   margin-top: 0;
 }
 
+/* Override the generic single-row history label layout. The comparison controls
+ * deliberately occupy stacked rows so status text never sits beside a picker. */
+.history-section.version-comparison-section {
+  align-items: stretch;
+  border-bottom: 1px solid var(--sidebar-border);
+  display: grid;
+  flex: none;
+  gap: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: min(46vh, 420px);
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  white-space: normal;
+}
+
+.history-section.version-comparison-section.collapsed {
+  grid-template-rows: auto;
+  max-height: none;
+}
+
+.version-comparison-header {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  padding: 8px 10px 8px 8px;
+}
+
+.version-comparison-toggle {
+  align-items: flex-start;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 12px minmax(0, 1fr);
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.version-comparison-toggle-caret {
+  color: var(--muted);
+  font: 11px/1.35 var(--font-mono);
+  margin-top: 2px;
+}
+
+.version-comparison-toggle-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.version-comparison-toggle-copy > strong {
+  color: var(--sidebar-text);
+  font: 700 11px/1.25 var(--font-sans);
+  text-transform: uppercase;
+}
+
+.version-comparison-summary {
+  color: var(--muted);
+  font: 11px/1.35 var(--font-mono);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.diff-scope-control {
+  border: 1px solid var(--sidebar-border);
+  border-radius: 6px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  overflow: hidden;
+}
+
+.diff-scope-control button {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  font: 600 10px/1.25 var(--font-sans);
+  min-width: 0;
+  padding: 5px 7px;
+  white-space: nowrap;
+}
+
+.diff-scope-control button + button {
+  border-left: 1px solid var(--sidebar-border);
+}
+
+.diff-scope-control button.selected {
+  background: color-mix(in srgb, var(--tree-selection-bg) 72%, transparent);
+  color: var(--sidebar-text);
+}
+
+.diff-scope-control button:disabled {
+  cursor: default;
+}
+
+.version-comparison-endpoint {
+  align-items: baseline;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.version-comparison-exit {
+  flex: none;
+}
+
+.commit-scope-heading {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  font: 600 10px/1.35 var(--font-sans);
+  gap: 0;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.commit-scope-heading-label {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.commit-scope-heading-label svg {
+  color: var(--muted);
+  transition: transform 120ms ease;
+}
+
+.commit-scope-heading-label svg.collapsed {
+  transform: rotate(-90deg);
+}
+
+.commit-scope-heading small {
+  color: var(--muted);
+  font: 9px/1.25 var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-comment-section {
+  border-bottom: 1px solid var(--sidebar-border);
+  min-width: 0;
+}
+
+.sidebar-comment-section-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--sidebar-text);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.sidebar-comment-section-toggle > span {
+  align-items: baseline;
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sidebar-comment-section-toggle strong {
+  font: 700 11px/1.25 var(--font-sans);
+  text-transform: uppercase;
+}
+
+.sidebar-comment-section-toggle small {
+  color: var(--muted);
+  font: 11px/1.25 var(--font-mono);
+}
+
+.sidebar-comment-section-toggle svg {
+  color: var(--muted);
+  flex: none;
+  transition: transform 120ms ease;
+}
+
+.sidebar-comment-section-toggle svg.collapsed {
+  transform: rotate(-90deg);
+}
+
+.sidebar-comment-section-body {
+  min-width: 0;
+}
+
+.ai-review-drawer {
+  border-bottom: 1px solid var(--sidebar-border);
+  min-width: 0;
+}
+
+.sidebar-comments-preferences {
+  border-bottom: 1px solid var(--sidebar-border);
+  padding: 6px 10px;
+}
+
+.ai-review-drawer-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.ai-review-drawer-toggle > span:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ai-review-drawer-toggle small {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-review-drawer-body {
+  display: grid;
+  gap: 8px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 0 10px 10px;
+}
+
+.ai-review-list.history-list {
+  flex: none;
+  max-height: 280px;
+  overflow: auto;
+  padding: 0;
+}
+
+.ai-review-entry {
+  border-top: 1px solid var(--sidebar-border);
+  display: grid;
+  gap: 3px;
+  padding-top: 8px;
+}
+
+.ai-review-entry small {
+  color: var(--muted);
+}
+
+.ai-review-entry p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.version-comparison-body {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0 12px 10px;
+}
+
+.version-comparison-section.collapsed .version-comparison-header {
+  padding-bottom: 8px;
+}
+
 .history-entry-subject {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1479,6 +2337,46 @@ html[data-codiff-platform='darwin'] .sidebar {
   width: 100%;
 }
 
+.sidebar-walkthrough-status-stack {
+  display: grid;
+  min-width: 0;
+  width: 100%;
+}
+
+.walkthrough-generation-structure {
+  border-bottom: 1px solid var(--sidebar-border);
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 8px 12px;
+}
+
+.walkthrough-generation-structure strong,
+.walkthrough-generation-structure small {
+  overflow-wrap: anywhere;
+}
+
+.walkthrough-generation-structure strong {
+  color: var(--sidebar-text);
+  font: 700 11px/1.35 var(--font-sans);
+}
+
+.walkthrough-generation-structure small {
+  color: var(--muted);
+  font: 10px/1.35 var(--font-mono);
+}
+
+.walkthrough-generation-structure button {
+  background: transparent;
+  border: 0;
+  color: var(--accent, var(--sidebar-text));
+  cursor: pointer;
+  font: 11px/1.35 var(--font-sans);
+  justify-self: start;
+  padding: 0;
+  text-align: left;
+}
+
 .sidebar-walkthrough-status {
   border-bottom: 1px solid var(--sidebar-border);
   color: var(--muted);
@@ -1517,7 +2415,71 @@ html[data-codiff-platform='darwin'] .sidebar {
   width: 100%;
 }
 
+.walkthrough-progress-copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  text-align: left;
+  width: 100%;
+}
+
+.walkthrough-progress-heading {
+  align-items: baseline;
+  display: inline-flex;
+  gap: 0.5ch;
+  justify-content: center;
+  max-width: 100%;
+  min-width: 0;
+}
+
 .walkthrough-progress-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.walkthrough-progress-units {
+  display: grid;
+  gap: 3px;
+  list-style: none;
+  margin: 0;
+  max-height: 12rem;
+  overflow: auto;
+  padding: 0;
+}
+
+.walkthrough-progress-unit {
+  align-items: baseline;
+  color: var(--muted, inherit);
+  display: grid;
+  font-size: 12px;
+  font-weight: 400;
+  gap: 8px;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  opacity: 0.9;
+}
+
+.walkthrough-progress-unit.is-generating {
+  color: inherit;
+  opacity: 1;
+}
+
+.walkthrough-progress-unit.is-ready {
+  opacity: 0.75;
+}
+
+.walkthrough-progress-unit.is-failed {
+  color: var(--danger, #a33a3a);
+}
+
+.walkthrough-progress-unit-status {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+  text-transform: lowercase;
+}
+
+.walkthrough-progress-unit-label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1526,7 +2488,6 @@ html[data-codiff-platform='darwin'] .sidebar {
 .walkthrough-progress-timer {
   flex: 0 0 2ch;
   font-variant-numeric: tabular-nums;
-  margin-left: 0.5ch;
   text-align: left;
   visibility: hidden;
   width: 2ch;
@@ -1538,6 +2499,43 @@ html[data-codiff-platform='darwin'] .sidebar {
 
 .walkthrough-progress .walkthrough-progress-timer {
   overflow: visible;
+}
+
+.walkthrough-generating-main {
+  align-items: center;
+  box-sizing: border-box;
+  display: flex;
+  flex: 1;
+  height: 100%;
+  justify-content: center;
+  min-height: 0;
+  min-width: 0;
+  padding: 24px;
+  width: 100%;
+}
+
+.walkthrough-generating-main .walkthrough-progress,
+.walkthrough-generating-main .walkthrough-progress-copy {
+  width: auto;
+}
+
+.walkthrough-generating-main .walkthrough-progress-copy {
+  justify-items: center;
+  text-align: center;
+}
+
+.walkthrough-generating-main .walkthrough-progress-label {
+  white-space: normal;
+}
+
+.walkthrough-generating-main .walkthrough-progress-units {
+  justify-items: start;
+  text-align: left;
+}
+
+.walkthrough-generating-main > span {
+  color: var(--muted);
+  font: 12px/1.4 var(--font-sans);
 }
 
 .sidebar-comment-list.history-list {
@@ -1571,10 +2569,21 @@ html[data-codiff-platform='darwin'] .sidebar {
 }
 
 .walkthrough-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 4px 4px 0;
+}
+
+.walkthrough-list > .wt-focus {
+  flex: none;
+}
+
+.walkthrough-list > .wt-toc-scroll {
   flex: 1;
   min-height: 0;
-  overflow: auto;
-  padding: 4px 4px 0;
 }
 
 .walkthrough-inline-code {
@@ -1693,6 +2702,8 @@ html[data-codiff-platform='darwin'] .sidebar {
   flex: none;
   gap: 8px;
   justify-content: flex-end;
+  min-width: max-content;
+  white-space: nowrap;
 }
 
 .pull-request-merge-status-badge {
@@ -1727,6 +2738,14 @@ html[data-codiff-platform='darwin'] .sidebar {
   overflow: clip;
 }
 
+.codiff-source-description-panel:has(.review-submit-popover),
+.codiff-source-description-overview-card:has(.review-submit-popover),
+.codiff-source-description-overview-status:has(.review-submit-popover) {
+  overflow: visible;
+  position: relative;
+  z-index: 13;
+}
+
 .codiff-source-description-panel,
 .merge-request-comments-source-description {
   font-size: 14px;
@@ -1750,6 +2769,35 @@ html[data-codiff-platform='darwin'] .sidebar {
 
 .codiff-source-description-panel-body {
   background: var(--code-bg);
+}
+
+.codiff-source-description-overview {
+  align-items: start;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 380px);
+  padding: 11px 12px 12px;
+}
+
+.codiff-source-description-overview-aside {
+  min-width: 0;
+}
+
+.codiff-source-description-overview-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.codiff-source-description-overview-card {
+  background: var(--code-bg);
+  border-radius: var(--codiff-diff-radius);
+  box-shadow:
+    0 0 0 1px var(--file-border),
+    6px 18px 80px -54px rgb(0 0 0 / 0.78);
+  corner-shape: squircle;
+  min-width: 0;
+  overflow: clip;
 }
 
 .codiff-source-description-footer {
@@ -2009,6 +3057,21 @@ html[data-codiff-platform='darwin'] .sidebar {
   min-height: 0;
   overflow: auto;
   padding: 11px 12px 48px;
+}
+
+.merge-request-review-surface {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: hidden;
+  padding: 11px 12px 0;
+}
+
+.merge-request-review-surface > :last-child {
+  flex: 1;
+  min-height: 0;
 }
 
 .merge-request-comments-source-description {
@@ -2700,6 +3763,7 @@ html[data-codiff-platform='darwin'] .sidebar {
 .codiff-file-comment-button,
 .codiff-markdown-button,
 .codiff-button,
+.codiff-open-button,
 .codiff-viewed-button,
 .codiff-copy-path-button {
   -webkit-app-region: no-drag;
@@ -2743,7 +3807,8 @@ html[data-codiff-platform='darwin'] .sidebar {
   color: var(--viewed);
 }
 
-.codiff-button.plan-download-button {
+.codiff-button.plan-download-button,
+.codiff-open-button.plan-download-button {
   height: 30px;
   padding: 0;
   width: 30px;
@@ -2795,6 +3860,7 @@ html[data-codiff-platform='darwin'] .sidebar {
 .codiff-file-comment-button:hover,
 .codiff-markdown-button:hover,
 .codiff-button:hover:not(:disabled),
+.codiff-open-button:hover:not(:disabled),
 .codiff-viewed-button:hover {
   background: rgb(127 127 127 / 0.11);
 }
@@ -2863,6 +3929,7 @@ html[data-codiff-platform='darwin'] .sidebar {
 .codiff-load-button,
 .codiff-markdown-button,
 .codiff-button,
+.codiff-open-button,
 .codiff-viewed-button {
   border-radius: 14px;
   corner-shape: squircle;
@@ -2899,14 +3966,92 @@ html[data-codiff-platform='darwin'] .sidebar {
   color: var(--diff-deletion);
 }
 
+.diffstat-additions {
+  color: var(--diff-addition);
+}
+
+.diffstat-deletions {
+  color: var(--diff-deletion);
+}
+
+.git-commit-ref-trigger {
+  align-items: center;
+  color: var(--tree-selection-focus);
+  cursor: pointer;
+  display: inline-flex;
+  min-width: 0;
+  text-decoration: none;
+}
+
+.git-commit-ref-trigger code {
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+}
+
+.git-commit-ref-trigger:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid var(--tree-selection-focus);
+  outline-offset: 2px;
+}
+
+.git-commit-tooltip-positioner {
+  z-index: 10000;
+}
+
+.git-commit-tooltip {
+  background: var(--code-bg);
+  border: 1px solid var(--file-border);
+  border-radius: 6px;
+  box-shadow: 0 10px 28px rgb(0 0 0 / 0.22);
+  color: var(--text);
+  display: grid;
+  gap: 5px;
+  max-width: min(360px, calc(100vw - 24px));
+  padding: 9px 10px;
+}
+
+.git-commit-tooltip > strong {
+  font: 600 11px/1.4 var(--font-sans);
+  overflow-wrap: anywhere;
+}
+
+.git-commit-tooltip-sha {
+  color: var(--muted);
+  font: 10px/1.4 var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.git-commit-tooltip-meta {
+  color: var(--muted);
+  font: 10px/1.4 var(--font-sans);
+}
+
+.git-commit-tooltip-diffstat {
+  display: inline-flex;
+  font: 600 10px/1.4 var(--font-mono);
+  gap: 7px;
+}
+
+.git-commit-tooltip-link {
+  align-items: center;
+  color: var(--tree-selection-focus);
+  display: inline-flex;
+  font: 600 10px/1.4 var(--font-sans);
+  gap: 5px;
+  margin-top: 2px;
+  text-decoration: none;
+  width: fit-content;
+}
+
 .codiff-status-badge.added,
 .codiff-status-badge.untracked,
 .codiff-section-badge.unstaged {
-  color: rgb(31 122 68);
+  color: var(--diff-addition);
 }
 
 .codiff-status-badge.deleted {
-  color: rgb(184 49 47);
+  color: var(--diff-deletion);
 }
 
 .codiff-status-badge.renamed,
@@ -2917,6 +4062,8 @@ html[data-codiff-platform='darwin'] .sidebar {
 .codiff-markdown-button,
 .codiff-load-button,
 .codiff-file-comment-button,
+.codiff-button,
+.codiff-open-button,
 .codiff-viewed-button {
   border: 1px solid rgb(127 127 127 / 0.18);
   flex: none;
@@ -2945,19 +4092,17 @@ html[data-codiff-platform='darwin'] .sidebar {
   opacity: 0.72;
 }
 
-.codiff-button {
+.codiff-button,
+.codiff-open-button {
   box-shadow:
     0 0 0 1px rgb(255 255 255 / 0) inset,
     0 10px 32px -24px rgb(0 0 0 / 0),
     0 8px 20px -16px rgb(0 0 0 / 0);
-  flex: none;
-  gap: 7px;
   transform: scale(1);
   transition:
     background 160ms ease,
     box-shadow 250ms ease,
     transform 250ms cubic-bezier(0.34, 1.56, 0.64, 1);
-  white-space: nowrap;
 }
 
 .codiff-button-size-default {
@@ -3010,18 +4155,21 @@ html[data-codiff-platform='darwin'] .sidebar {
   text-decoration: underline;
 }
 
-.codiff-button:hover:not(:disabled) {
+.codiff-button:hover:not(:disabled),
+.codiff-open-button:hover:not(:disabled) {
   box-shadow:
     0 10px 32px -24px rgb(0 0 0 / 0.92),
     0 8px 20px -16px rgb(0 0 0 / 0.82);
   transform: scale(1.05);
 }
 
-.codiff-button:active:not(:disabled):not(:has(.review-submit-toggle:active)) {
+.codiff-button:active:not(:disabled):not(:has(.review-submit-toggle:active)),
+.codiff-open-button:active:not(:disabled):not(:has(.review-submit-toggle:active)) {
   transform: scale(0.95);
 }
 
-.codiff-button:disabled {
+.codiff-button:disabled,
+.codiff-open-button:disabled {
   color: var(--muted);
   cursor: default;
   opacity: 0.55;
@@ -3621,9 +4769,11 @@ diffs-container .review-comment-thread {
 .review-submit-primary {
   gap: 7px;
   padding: 0 9px 0 11px;
+  white-space: nowrap;
 }
 
 .review-submit-toggle {
+  flex: none;
   width: 28px;
 }
 
@@ -3679,6 +4829,7 @@ diffs-container .review-comment-thread {
 
 .review-submit-button.close {
   color: var(--text);
+  white-space: nowrap;
 }
 
 .review-submit-popover {
@@ -3787,7 +4938,6 @@ diffs-container .review-comment-thread {
 .loading {
   color: var(--muted);
   font-family: var(--font-mono);
-  font-style: italic;
   font-size: 13px;
   transform: translateY(-12px);
   user-select: none;
@@ -3903,6 +5053,7 @@ diffs-container .review-comment-thread {
   .codiff-load-button,
   .codiff-file-comment-button,
   .codiff-button,
+  .codiff-open-button,
   .codiff-viewed-button {
     padding-inline: 9px;
   }
@@ -4176,4 +5327,92 @@ diffs-container .review-comment-thread {
   .review-mode-label {
     display: none;
   }
+}
+
+@container sidebar (max-width: 260px) {
+  .version-comparison-header {
+    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .diff-scope-control {
+    width: 100%;
+  }
+
+  .version-picker-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .version-comparison-endpoint {
+    flex-wrap: wrap;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .version-unit-scope {
+    align-items: flex-start;
+    display: grid;
+    gap: 4px;
+  }
+
+  .sidebar-mode-toggle {
+    gap: 4px;
+    grid-template-columns: minmax(42px, 0.75fr) minmax(82px, 1.35fr) minmax(58px, 0.9fr);
+    padding-inline: 8px;
+  }
+
+  .merge-request-shell .sidebar-mode-toggle {
+    grid-template-columns: minmax(40px, 0.65fr) minmax(78px, 1.05fr) minmax(88px, 1.3fr);
+  }
+
+  .sidebar-mode-toggle button {
+    font-size: 11px;
+    gap: 4px;
+    padding-inline: 4px;
+  }
+
+  .sidebar-tab-count {
+    min-width: 14px;
+    padding-inline: 4px;
+  }
+}
+
+.walkthrough-regenerate-controls {
+  align-items: stretch !important;
+  display: grid !important;
+  gap: 6px !important;
+  padding: 8px 12px !important;
+  text-transform: none !important;
+  white-space: normal !important;
+}
+.walkthrough-regenerate-controls > span {
+  color: var(--muted);
+  font: 10px/1.35 var(--font-mono);
+  text-transform: uppercase;
+}
+.walkthrough-regenerate-controls .merge-request-nav-button {
+  justify-content: flex-start;
+  min-height: 28px;
+  padding: 0 8px;
+  width: 100%;
+}
+
+.walkthrough-structure-controls {
+  align-items: stretch !important;
+  display: grid !important;
+  gap: 6px !important;
+  padding: 8px 12px !important;
+  text-transform: none !important;
+  white-space: normal !important;
+}
+.walkthrough-structure-controls > span {
+  color: var(--muted);
+  font: 10px/1.35 var(--font-mono);
+  text-transform: uppercase;
+}
+.walkthrough-structure-controls .merge-request-nav-button {
+  justify-content: flex-start;
+  min-height: 28px;
+  padding: 0 8px;
+  width: 100%;
 }

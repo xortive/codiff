@@ -30,6 +30,11 @@ const {
   isSyntheticWalkthroughHunk,
   sumHunkLineCounts,
 } = require('../core/lib/narrative-walkthrough-diff.cjs');
+const {
+  buildWalkthroughPrompt: buildSharedWalkthroughPrompt,
+  buildWalkthroughPromptInput: buildSharedWalkthroughPromptInput,
+  normalizeNarrativeWalkthrough: normalizeSharedWalkthrough,
+} = require('./walkthrough-authoring-bridge.cjs');
 
 /**
  * @typedef {import('../core/types.ts').ChangedFile} ChangedFile
@@ -437,7 +442,12 @@ const addUnreferencedSupport = (support, index, coveredHunkIds, itemIds) => {
   }
 };
 
-const normalizeNarrativeWalkthrough = (input, files, facts = {}, hunkIdByAlias = new Map()) => {
+const normalizeNarrativeWalkthrough = async (
+  input,
+  files,
+  facts = {},
+  hunkIdByAlias = new Map(),
+) => {
   if (!input || typeof input !== 'object') {
     throw new Error('Narrative walkthrough is not an object.');
   }
@@ -447,49 +457,27 @@ const normalizeNarrativeWalkthrough = (input, files, facts = {}, hunkIdByAlias =
     );
   }
 
-  const index = indexFiles(files, hunkIdByAlias);
-  const coveredHunkIds = new Set();
-  const { chapters, itemIds, stopCount } = normalizeChapters(input, index, coveredHunkIds);
-  if (chapters.length === 0 || stopCount === 0) {
-    throw new Error('Narrative walkthrough has no chapters with resolvable stops.');
-  }
-
-  const support = normalizeAuthoredSupport(input, index, coveredHunkIds, itemIds);
-  addUnreferencedSupport(support, index, coveredHunkIds, itemIds);
-
-  const branch = typeof facts.branch === 'string' || facts.branch === null ? facts.branch : null;
-  const source =
-    facts.source && typeof facts.source === 'object' ? facts.source : { type: 'working-tree' };
-
-  /** @type {Record<string, unknown>} */
-  const result = {
-    agent: normalizeEnum(facts.agent, AGENTS, 'codex'),
-    chapters,
-    focus: cleanText(input.focus, 'Walk through the change.'),
-    generatedAt: normalizeGeneratedAt(facts.generatedAt),
-    kind: 'narrative',
-    repo: {
-      branch,
-      root: oneLine(facts.root),
-    },
-    source,
-    support,
-    title: cleanText(input.title, 'Walkthrough'),
-    version: 4,
+  const state = {
+    branch: typeof facts.branch === 'string' || facts.branch === null ? facts.branch : null,
+    files,
+    generatedAt:
+      typeof facts.generatedAt === 'number'
+        ? facts.generatedAt
+        : typeof facts.generatedAt === 'string'
+          ? Date.parse(facts.generatedAt) || Date.now()
+          : Date.now(),
+    launchPath: typeof facts.root === 'string' ? facts.root : '',
+    root: typeof facts.root === 'string' ? facts.root : '',
+    source:
+      facts.source && typeof facts.source === 'object' ? facts.source : { type: 'working-tree' },
   };
-
-  result.meta = `${stopCount} stops · ${chapters.length} chapters`;
-  if (facts.context && typeof facts.context === 'object') {
-    result.context = facts.context;
+  const agent = normalizeEnum(facts.agent, AGENTS, 'codex');
+  const walkthrough = await normalizeSharedWalkthrough(input, state, agent, hunkIdByAlias);
+  if (facts.context && typeof facts.context === 'object' && !walkthrough.context) {
+    walkthrough.context = facts.context;
   }
-
-  // A commit composer only makes sense for a live staging set — never a past
-  // commit, branch, or pull request. For working trees, always expose the
-  // composer even when the agent did not draft a message, so the reviewer can
-  // complete the whole workflow in Codiff.
-  if (/** @type {{type?: string}} */ (result.source).type === 'working-tree') {
-    /** @type {Record<string, unknown>} */
-    const commit = {};
+  // Preserve working-tree commit composer behavior from the local host.
+  if (state.source.type === 'working-tree') {
     const inputCommit = input.commit && typeof input.commit === 'object' ? input.commit : {};
     const rawBody = cleanRich(inputCommit.body);
     let title = cleanText(inputCommit.title);
@@ -502,17 +490,17 @@ const normalizeNarrativeWalkthrough = (input, files, facts = {}, hunkIdByAlias =
         title = firstLine;
       }
     }
-    if (title) {
-      commit.title = title;
-    }
+    /** @type {Record<string, unknown>} */
+    const commit = {};
+    if (title) commit.title = title;
     const body = stripLeadingCommitTitle(rawBody, title);
-    if (body) {
-      commit.body = body;
-    }
-    result.commit = commit;
+    if (body) commit.body = body;
+    walkthrough.commit = commit;
+  } else {
+    delete walkthrough.commit;
   }
-
-  return /** @type {NarrativeWalkthrough} */ (result);
+  walkthrough.generatedAt = normalizeGeneratedAt(facts.generatedAt) || walkthrough.generatedAt;
+  return walkthrough;
 };
 
 /** @param {DiffSection} section @param {number} remainingBudget @param {number} sectionPatchBudget */
@@ -810,41 +798,42 @@ Grouping contract:
 `;
 };
 
-const buildNarrativeWalkthroughRequest = (
+const buildNarrativeWalkthroughRequest = async (
   state,
   context,
   agentLabel = 'Codex',
   customPrompt,
   previousWalkthrough,
 ) => {
-  const { hunkIdByAlias, input } = buildPromptInput(state);
+  const { loadAuthoring } = require('./walkthrough-authoring-bridge.cjs');
+  const authoring = await loadAuthoring();
+  const hunkIndex = authoring.indexWalkthroughHunks(state.files);
+  const sharedPrompt = authoring.buildWalkthroughPrompt(state);
+  const prompt = `${sharedPrompt}
+
+${buildWalkthroughContextInput(context, agentLabel)}${buildCustomPromptInput(customPrompt)}${buildPreviousWalkthroughInput(previousWalkthrough)}`;
   return {
-    hunkIdByAlias,
-    prompt: `You are authoring Codiff's narrative walkthrough JSON.
-
-Return JSON only. Do not inspect the repository or run shell commands; use only the optional conversation context and repository digest below.
-If source.description is present, treat it as author-written PR/MR intent and orientation, not proof of behavior. The changed files, patches, and hunk data remain the source of truth for what changed.
-
-${buildWalkthroughSizingGuidance(state)}
-
-${buildWalkthroughContextInput(context, agentLabel)}
-${buildCustomPromptInput(customPrompt)}
-${buildPreviousWalkthroughInput(previousWalkthrough)}
-Repository change digest:
-${JSON.stringify(input)}
-`,
+    hunkIdByAlias: hunkIndex.hunkIdByAlias,
+    prompt,
   };
 };
 
-const buildNarrativeWalkthroughPrompt = (
+const buildNarrativeWalkthroughPrompt = async (
   state,
   context,
   agentLabel = 'Codex',
   customPrompt,
   previousWalkthrough,
 ) =>
-  buildNarrativeWalkthroughRequest(state, context, agentLabel, customPrompt, previousWalkthrough)
-    .prompt;
+  (
+    await buildNarrativeWalkthroughRequest(
+      state,
+      context,
+      agentLabel,
+      customPrompt,
+      previousWalkthrough,
+    )
+  ).prompt;
 
 /**
  * Cache identity for the exact model input. The previous walkthrough is
@@ -857,8 +846,8 @@ const buildNarrativeWalkthroughPrompt = (
  * @param {WalkthroughContext | null | undefined} context
  * @param {unknown} customPrompt
  */
-const getNarrativeWalkthroughCacheKey = (state, agent, model, context, customPrompt) => {
-  const prompt = buildNarrativeWalkthroughPrompt(state, context, agent.label, customPrompt);
+const getNarrativeWalkthroughCacheKey = async (state, agent, model, context, customPrompt) => {
+  const prompt = await buildNarrativeWalkthroughPrompt(state, context, agent.label, customPrompt);
   return createHash('sha256')
     .update(
       JSON.stringify({
@@ -894,7 +883,7 @@ const readNarrativeWalkthrough = async (
   try {
     const timeoutMs = getNarrativeWalkthroughTimeoutMs(state, agent.defaultTimeoutMs);
     const { fileCount, hunkCount } = getWalkthroughSize(state);
-    const { hunkIdByAlias, prompt } = buildNarrativeWalkthroughRequest(
+    const { hunkIdByAlias, prompt } = await buildNarrativeWalkthroughRequest(
       state,
       context,
       agent.label,
@@ -915,7 +904,7 @@ const readNarrativeWalkthrough = async (
     );
     agentOptions?.onProgress?.('response-received');
     const parsed = parseJSONMessage(response);
-    const walkthrough = normalizeNarrativeWalkthrough(
+    const walkthrough = await normalizeNarrativeWalkthrough(
       parsed,
       state.files,
       {

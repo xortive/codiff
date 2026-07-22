@@ -1,6 +1,10 @@
 import { expect, test, vi } from 'vite-plus/test';
 import { generateReviewWalkthrough } from '../lib/generate-review-walkthrough.ts';
-import type { RepositoryState, ReviewCommitEvolution } from '../types.ts';
+import type {
+  RepositoryState,
+  ReviewCommitEvolution,
+  WalkthroughGenerationProgress,
+} from '../types.ts';
 import { createChangedFile } from './helpers/fixtures.ts';
 
 const baseState = {
@@ -109,16 +113,31 @@ test('generateReviewWalkthrough units path fans out and composes', async () => {
     ],
   } satisfies ReviewCommitEvolution;
 
-  const runModel = vi.fn(async () => ({ draft }));
+  let releaseModels: () => void;
+  const modelsReady = new Promise<void>((resolve) => {
+    releaseModels = resolve;
+  });
+  const runModel = vi.fn(async () => {
+    await modelsReady;
+    return { draft };
+  });
+  const progressUpdates: Array<WalkthroughGenerationProgress> = [];
+  const overviewPrompts: Array<string> = [];
+  const runOverviewModel = vi.fn(async ({ prompt }: { prompt: string }) => {
+    overviewPrompts.push(prompt);
+    return { focus: 'The added commits establish the feature in two ordered steps.' };
+  });
   const unitState = {
     ...baseState,
     files: [createChangedFile('src/unit.ts')],
   } satisfies RepositoryState;
 
-  const result = await generateReviewWalkthrough({
+  const generation = generateReviewWalkthrough({
     agent: 'codex',
     evolution,
+    onProgress: (progress) => progressUpdates.push(progress),
     runModel,
+    runOverviewModel,
     states: {
       byUnitId: {
         'introduced:a': unitState,
@@ -128,15 +147,76 @@ test('generateReviewWalkthrough units path fans out and composes', async () => {
     },
     structure: 'units',
   });
+  expect(runModel).toHaveBeenCalledTimes(2);
+  releaseModels!();
+  const result = await generation;
 
   expect(result.status).toBe('ready');
   if (result.status !== 'ready') {
     return;
   }
   expect(runModel).toHaveBeenCalledTimes(2);
+  expect(runOverviewModel).toHaveBeenCalledTimes(1);
+  expect(overviewPrompts).toEqual([expect.stringContaining('"kind":"added"')]);
+  expect(result.walkthrough.focus).toBe(
+    'The added commits establish the feature in two ordered steps.',
+  );
+  expect(result.walkthrough.chapters[0]?.commit?.versionCommitKind).toBe('introduced');
   expect(result.plan.structure).toBe('units');
   expect(result.walkthrough.chapters.length).toBeGreaterThan(0);
   expect(result.walkthrough.title).toContain('Commit-by-commit');
+  expect(progressUpdates).toContainEqual(
+    expect.objectContaining({
+      phase: 'generating-units',
+      total: 2,
+      units: expect.arrayContaining([expect.objectContaining({ status: 'generating' })]),
+    }),
+  );
+  expect(progressUpdates).toContainEqual(
+    expect.objectContaining({ phase: 'combining', summary: 'Composing commit walkthroughs.' }),
+  );
+});
+
+test('generateReviewWalkthrough authors ordinary commit units with commit context', async () => {
+  const commitUnit = {
+    commit: {
+      authoredAt: '2026-01-01T00:00:00.000Z',
+      authorName: 'Ada',
+      parentIds: ['0'.repeat(40)],
+      sha: 'a'.repeat(40),
+      shortSha: 'aaaaaaa',
+      subject: 'Add the request path',
+    },
+    id: `commit:${'a'.repeat(40)}`,
+    kind: 'commit' as const,
+    order: 0,
+    reviewable: true as const,
+  };
+  const prompts: Array<string> = [];
+  const result = await generateReviewWalkthrough({
+    agent: 'codex',
+    plan: { structure: 'units', units: [commitUnit] },
+    runModel: async ({ prompt }) => {
+      prompts.push(prompt);
+      return { draft };
+    },
+    states: {
+      byUnitId: { [commitUnit.id]: baseState },
+      whole: baseState,
+    },
+  });
+
+  expect(result.status).toBe('ready');
+  if (result.status !== 'ready') {
+    return;
+  }
+  expect(prompts[0]).toContain('This is an independent walkthrough for commit');
+  expect(prompts[0]).not.toContain('version comparison');
+  expect(result.walkthrough.chapters[0]?.commit).toMatchObject({
+    gitSha: commitUnit.commit.sha,
+    sha: commitUnit.commit.sha,
+  });
+  expect(result.walkthrough.commitFiles).toEqual(baseState.files);
 });
 
 test('generateReviewWalkthrough fails clearly without whole state', async () => {

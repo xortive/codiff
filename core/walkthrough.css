@@ -8,11 +8,35 @@
   border-bottom: 1px solid var(--sidebar-border);
   padding: 0 8px 8px;
 }
+.wt-focus-header {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+}
 .wt-focus-label {
   color: var(--text);
   font: 700 10px/1 var(--font-sans);
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+.wt-regen-button {
+  background: transparent;
+  border: 1px solid rgb(127 127 127 / 0.22);
+  border-radius: 999px;
+  color: var(--muted);
+  cursor: pointer;
+  flex: none;
+  font: 9px/1 var(--font-mono);
+  letter-spacing: 0.04em;
+  padding: 4px 7px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.wt-regen-button:hover {
+  background: rgb(127 127 127 / 0.12);
+  color: var(--sidebar-text);
 }
 .wt-focus p {
   color: var(--sidebar-text);
@@ -37,6 +61,37 @@
 .wt-toc-chapter {
   display: flex;
   flex-direction: column;
+}
+.wt-toc-chapter.commit-boundary {
+  border-top: 1px solid var(--file-border);
+  margin-top: 8px;
+  padding-top: 8px;
+}
+.wt-toc-chapter.commit-boundary:first-child {
+  margin-top: 0;
+}
+.wt-commit-boundary-label {
+  align-items: center;
+  color: var(--muted);
+  display: grid;
+  font: 10px/1.25 var(--font-mono);
+  gap: 6px;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 2px 7px;
+}
+.wt-commit-boundary-label code {
+  color: var(--sidebar-text);
+}
+.wt-commit-boundary-label span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wt-commit-evolution-indicator {
+  flex-shrink: 0;
 }
 .wt-toc-chapter-head {
   align-items: center;
@@ -329,14 +384,72 @@
   gap: 12px;
   margin: 0 0 12px;
 }
+.wt-comment-references {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.wt-comment-reference {
+  background: color-mix(in srgb, var(--tree-selection-focus) 7%, transparent);
+  border-left: 3px solid var(--tree-selection-focus);
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+.wt-comment-reference.resolved-by-change {
+  border-left-color: var(--addition);
+}
+.wt-comment-reference > div {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+.wt-comment-reference a,
+.wt-comment-reference strong {
+  color: var(--text);
+  font: 600 12px/1.35 var(--font-sans);
+}
+.wt-comment-reference span {
+  color: var(--muted);
+  font: 11px/1.35 var(--font-sans);
+}
+.wt-comment-reference blockquote {
+  color: var(--muted);
+  font: 12px/1.45 var(--font-sans);
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+}
+.wt-regenerate {
+  align-items: center;
+  background: color-mix(in srgb, var(--tree-selection-focus) 13%, transparent);
+  border: 0;
+  border-radius: 14px;
+  color: var(--tree-selection-focus);
+  corner-shape: squircle;
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  font: 600 12px/1 var(--font-sans);
+  gap: 6px;
+  padding: 7px 12px;
+}
+.wt-regenerate:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
 /* ---- Variation C — hybrid arc timeline ------------------------------------ */
 .wt-hybrid {
   display: flex;
+  flex: 1;
   flex-direction: column;
   height: 100%;
   min-height: 0;
   min-width: 0;
   width: 100%;
+}
+
+.codiff-web-review > .wt-arc {
+  order: -1;
 }
 .wt-arc {
   align-items: center;
@@ -453,6 +566,14 @@
 .wt-arc-chapter-label.muted {
   color: color-mix(in srgb, var(--muted) 85%, transparent);
 }
+.wt-arc-commit-ref {
+  background: color-mix(in srgb, var(--tree-selection-focus) 14%, transparent);
+  border-radius: 4px;
+  color: var(--tree-selection-focus);
+  font: 9px/1.3 var(--font-mono);
+  padding: 1px 4px;
+  text-transform: none;
+}
 .wt-arc-chapter-label .icon {
   font-size: 13px;
 }
@@ -560,6 +681,37 @@
 }
 .wt-stop-block-header.current {
   box-shadow: inset 3px 0 0 var(--tree-selection-focus);
+}
+.wt-main-commit-section {
+  margin: 0 0 20px;
+}
+.wt-main-commit-boundary {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  align-items: baseline;
+  background: color-mix(in srgb, var(--tree-selection-focus) 8%, var(--app-bg));
+  border-block: 1px solid color-mix(in srgb, var(--tree-selection-focus) 30%, var(--file-border));
+  display: flex;
+  gap: 8px;
+  padding: 10px 24px;
+}
+.wt-main-commit-boundary > span {
+  color: var(--muted);
+  font: 700 10px/1 var(--font-sans);
+  text-transform: uppercase;
+}
+.wt-main-commit-boundary code {
+  color: var(--tree-selection-focus);
+  font: 11px/1.2 var(--font-mono);
+}
+.wt-main-commit-boundary strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font: 600 12px/1.3 var(--font-sans);
 }
 
 /* The whole order as one continuous scroll: each stop is a block (narration +
@@ -1284,7 +1436,7 @@
   display: flex;
   gap: 8px;
 }
-.codiff-button.wt-commit-btn {
+.codiff-open-button.wt-commit-btn {
   background: var(--viewed);
   border-color: color-mix(in srgb, var(--viewed) 46%, transparent);
   box-shadow:
@@ -1294,7 +1446,7 @@
     0 10px 30px -16px color-mix(in srgb, var(--viewed) 90%, transparent);
   color: #fff;
 }
-.codiff-button.wt-commit-btn:hover:not(:disabled) {
+.codiff-open-button.wt-commit-btn:hover:not(:disabled) {
   background: color-mix(in srgb, var(--viewed) 92%, #fff);
   box-shadow:
     0 0 0 1px rgb(255 255 255 / 0.2) inset,
@@ -1303,10 +1455,10 @@
     0 10px 30px -16px color-mix(in srgb, var(--viewed) 90%, transparent);
   transform: scale(1.05);
 }
-.codiff-button.wt-commit-btn:active:not(:disabled) {
+.codiff-open-button.wt-commit-btn:active:not(:disabled) {
   transform: scale(0.95);
 }
-.codiff-button.wt-commit-btn:disabled {
+.codiff-open-button.wt-commit-btn:disabled {
   background: var(--hover-wash);
   border-color: rgb(127 127 127 / 0.18);
   box-shadow: none;
@@ -1315,4 +1467,116 @@
 .wt-commit-btn .lc {
   color: #fff;
   font: inherit;
+}
+
+.wt-commit-boundary-label {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+.wt-commit-boundary-label code {
+  flex: none;
+  white-space: nowrap;
+}
+.wt-commit-boundary-subject {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wt-commit-rebase-badge {
+  background: color-mix(in srgb, #d9962f 14%, transparent);
+  border: 1px solid color-mix(in srgb, #d9962f 35%, transparent);
+  border-radius: 4px;
+  color: #d9962f;
+  font: 10px/1.35 var(--font-sans);
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding: 2px 5px;
+  width: fit-content;
+}
+.wt-commit-rebase-badge:focus-visible {
+  outline: 2px solid var(--tree-selection-focus);
+  outline-offset: 2px;
+}
+.wt-main-rebase-context {
+  border-bottom: 1px solid color-mix(in srgb, #d9962f 30%, var(--file-border));
+  display: grid;
+  gap: 7px;
+  padding: 10px 24px 12px;
+}
+.wt-main-rebase-context > strong {
+  color: #d9962f;
+  font: 600 11px/1.35 var(--font-sans);
+}
+.wt-main-rebase-context.legacy > span {
+  color: var(--muted);
+  font: 11px/1.45 var(--font-sans);
+}
+.wt-main-rebase-drivers {
+  display: grid;
+  gap: 5px;
+}
+.wt-main-rebase-drivers > a,
+.wt-main-rebase-drivers > div {
+  color: inherit;
+  display: grid;
+  gap: 2px 7px;
+  grid-template-columns: auto minmax(0, 1fr);
+  text-decoration: none;
+}
+.wt-main-rebase-drivers code {
+  color: var(--tree-selection-focus);
+  font: 10px/1.4 var(--font-mono);
+}
+.wt-main-rebase-drivers span {
+  font: 11px/1.4 var(--font-sans);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.wt-main-rebase-drivers small {
+  color: var(--muted);
+  font: 10px/1.4 var(--font-sans);
+  grid-column: 2;
+}
+.wt-version-base-context {
+  border-bottom: 1px solid var(--file-border);
+  display: grid;
+  gap: 5px;
+  padding: 12px 24px;
+}
+.wt-version-base-context > strong {
+  font: 600 12px/1.4 var(--font-sans);
+}
+.wt-version-base-context > span,
+.wt-version-base-context summary {
+  color: var(--muted);
+  font: 11px/1.45 var(--font-sans);
+}
+.wt-version-base-context summary {
+  cursor: pointer;
+}
+.wt-version-base-context details > div {
+  display: grid;
+  gap: 4px;
+  margin-top: 6px;
+}
+.wt-version-base-context details > div > div {
+  color: inherit;
+  display: grid;
+  gap: 7px;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+.wt-version-base-context .git-commit-ref-trigger {
+  color: var(--tree-selection-focus);
+  font: 10px/1.4 var(--font-mono);
+}
+.wt-version-base-context details > div > div > span {
+  font: 11px/1.4 var(--font-sans);
+  overflow-wrap: anywhere;
 }

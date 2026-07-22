@@ -17,7 +17,7 @@ import {
   isSyntheticWalkthroughHunk,
 } from './narrative-walkthrough-diff.js';
 
-type NarrativeLineCount = {
+export type NarrativeLineCount = {
   added: number;
   deleted: number;
 };
@@ -29,12 +29,12 @@ export type WalkthroughStopView = WalkthroughStop & {
 };
 
 /** A chapter with indexed stops. */
-type WalkthroughChapterView = Omit<WalkthroughChapter, 'stops'> & {
+export type WalkthroughChapterView = Omit<WalkthroughChapter, 'stops'> & {
   stops: ReadonlyArray<WalkthroughStopView>;
 };
 
 /** Support grouped by reason, preserving first-seen order. */
-type WalkthroughSupportReason = {
+export type WalkthroughSupportReason = {
   files: ReadonlyArray<WalkthroughSupportGroup>;
   reason: string;
 };
@@ -338,20 +338,41 @@ export const resolveWalkthroughHunkFile = (
   hunk: WalkthroughHunk,
   files: ReadonlyArray<ChangedFile>,
 ): ResolvedWalkthroughHunkFile | null => {
-  const file = files.find((candidate) => candidate.path === hunk.path);
-  if (!file) {
+  const candidates = files.filter((candidate) => candidate.path === hunk.path);
+  if (candidates.length === 0) {
     return null;
   }
-
-  const section = hunk.anchor.sectionId
-    ? file.sections.find((candidate) => candidate.id === hunk.anchor.sectionId)
-    : undefined;
-  if (!section) {
+  const sectionId = hunk.anchor.sectionId;
+  if (!sectionId) {
     return null;
   }
-
-  return { file, section };
+  for (const file of candidates) {
+    const section = file.sections.find((candidate) => candidate.id === sectionId);
+    if (section) {
+      return { file, section };
+    }
+  }
+  return null;
 };
+
+export const getWalkthroughCommitDiffShas = (
+  walkthrough: Pick<NarrativeWalkthrough, 'chapters'>,
+): ReadonlyArray<string> => {
+  const seen = new Set<string>();
+  return walkthrough.chapters.flatMap((chapter) => {
+    const sha = chapter.commit?.gitSha ?? chapter.commit?.sha;
+    if (!sha || seen.has(sha)) {
+      return [];
+    }
+    seen.add(sha);
+    return [sha];
+  });
+};
+
+export const combineWalkthroughCommitFiles = (
+  commitShas: ReadonlyArray<string>,
+  filesBySha: Readonly<Record<string, ReadonlyArray<ChangedFile>>>,
+): ReadonlyArray<ChangedFile> => commitShas.flatMap((sha) => filesBySha[sha] ?? []);
 
 const walkthroughHunkRunKey = (item: WalkthroughHunkGroup, hunks: ReadonlyArray<WalkthroughHunk>) =>
   `${item.id}:${hunks.map((hunk) => hunk.id).join(',')}`;

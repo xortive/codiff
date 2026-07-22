@@ -94,3 +94,46 @@ test('reserves timer space, reveals 3s without shifting, and resets for each sta
     container.remove();
   }
 });
+
+test('renders a detailed commit-unit preparation status', async () => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = createRoot(container);
+
+  try {
+    await act(async () => {
+      root?.render(
+        <WalkthroughProgress
+          phase={null}
+          progress={{
+            completed: 1,
+            phase: 'preparing',
+            summary: 'Preparing aaaaaaa Add review focus.',
+            total: 2,
+            units: [
+              { id: 'introduced:a', label: 'aaaaaaa Add review focus', status: 'ready' },
+              {
+                detail: 'Loading commit diff…',
+                id: 'introduced:b',
+                label: 'bbbbbbb Render commit pills',
+                status: 'generating',
+              },
+            ],
+          }}
+          responseLabelIndex={0}
+          stageRevision={0}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain('1/2');
+    expect(container.textContent).toContain('Preparing aaaaaaa Add review focus.');
+    expect(container.textContent).toContain('done');
+    expect(container.textContent).toContain('generating');
+    expect(container.textContent).toContain('bbbbbbb Render commit pills');
+  } finally {
+    await act(async () => root?.unmount());
+    root = null;
+    container.remove();
+  }
+});

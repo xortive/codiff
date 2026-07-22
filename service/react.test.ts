@@ -5,7 +5,6 @@ const comment = {
   body: 'Keep this visible while it saves.',
   filePath: 'src/review.ts',
   lineNumber: 12,
-  sectionId: 'src/review.ts:unstaged',
   side: 'additions',
 } as const;
 

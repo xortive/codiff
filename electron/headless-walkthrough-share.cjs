@@ -185,7 +185,7 @@ const shareWalkthroughFile = async ({
     throw new Error(`Could not read walkthrough file: ${detail}`);
   }
 
-  const walkthrough = normalizeNarrativeWalkthrough(input, state.files, {
+  const walkthrough = await normalizeNarrativeWalkthrough(input, state.files, {
     agent,
     branch: state.branch,
     generatedAt: state.generatedAt,

@@ -1,4 +1,4 @@
-import type { MergeRequestVersionRef, VersionPatchFile } from '../version-compare.ts';
+import type { MergeRequestVersionRef, VersionPatchFile } from '../src/version-compare.ts';
 
 /** Synthetic fixtures used for version-comparison algorithm coverage without live GitLab. */
 
@@ -29,7 +29,7 @@ export const pureRebaseFiles = {
       newPath: 'src/app.ts',
       oldPath: 'src/app.ts',
       patchBody: sameLogicalPatch,
-      status: 'modified',
+      status: 'modified' as const,
     },
   ],
   to: [
@@ -38,7 +38,7 @@ export const pureRebaseFiles = {
       oldPath: 'src/app.ts',
       // Context lines shifted after rebase, same change regions.
       patchBody: '@@ -10,2 +10,2 @@\n const value = 1;\n-old();\n+newCall();\n',
-      status: 'modified',
+      status: 'modified' as const,
     },
   ],
 } satisfies {
@@ -53,13 +53,13 @@ export const rebasePlusEditFiles = {
       newPath: 'src/app.ts',
       oldPath: 'src/app.ts',
       patchBody: '@@ -10,2 +10,3 @@\n const value = 1;\n-old();\n+newCall();\n+guard();\n',
-      status: 'modified',
+      status: 'modified' as const,
     },
     {
       newPath: 'README.md',
       oldPath: 'README.md',
       patchBody: '@@ -1 +1 @@\n-hello\n+hello world\n',
-      status: 'modified',
+      status: 'modified' as const,
     },
   ],
 } satisfies {
@@ -74,7 +74,7 @@ export const conflictResolutionFiles = {
       newPath: 'src/app.ts',
       oldPath: 'src/app.ts',
       patchBody: '@@ -1,5 +1,7 @@\n<<<<<<< HEAD\n-old();\n=======\n+resolved();\n>>>>>>> feature\n',
-      status: 'modified',
+      status: 'modified' as const,
     },
   ],
 } satisfies {

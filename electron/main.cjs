@@ -1,5 +1,6 @@
 // @ts-check
 
+const { createHash } = require('node:crypto');
 const { existsSync, readFileSync, writeFileSync } = require('node:fs');
 const { basename, dirname, join, relative, resolve } = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -26,11 +27,28 @@ const {
   submitPullRequestReview,
   validateRepositoryPath,
 } = require('./git-state.cjs');
+const {
+  compareGitLabReviewVersions,
+  listGitLabReviewVersions,
+  loadGitLabVersionCommitUnitDiff,
+} = require('./git-state/gitlab-review-history.cjs');
+const {
+  compareReviewVersions,
+  listReviewVersions,
+  loadReviewVersionUnitDiff,
+} = require('./git-state/review-history.cjs');
+const {
+  generateReviewWalkthrough: generateReviewWalkthroughShared,
+} = require('./generate-review-walkthrough-bridge.cjs');
 const { normalizeOpenAIModel } = require('./codex.cjs');
 const { normalizeClaudeModel } = require('./claude.cjs');
 const { normalizeOpenCodeModel, renderOpenCodeCommand } = require('./opencode.cjs');
 const { createWalkthroughCommit } = require('./walkthrough-commit.cjs');
 const { diagnoseWalkthroughMismatch } = require('./walkthrough-diagnosis.cjs');
+const {
+  narrativeWalkthroughResponseSchema,
+  versionCommitOverviewResponseSchema,
+} = require('./narrative-walkthrough-schema.cjs');
 const { readCommitMessageReply } = require('./walkthrough-commit-message.cjs');
 const { normalizePiModel } = require('./pi.cjs');
 const {
@@ -1420,7 +1438,7 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
       try {
         return {
           status: 'ready',
-          walkthrough: normalizeNarrativeWalkthrough(input, state.files, {
+          walkthrough: await normalizeNarrativeWalkthrough(input, state.files, {
             agent: agent.id,
             branch: state.branch,
             context: sessionContext,
@@ -1453,7 +1471,7 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
     const agentOptions = getAgentOptions(agent);
     const walkthroughModel = resolveNarrativeWalkthroughModel(state, agent, agentOptions.model);
     const walkthroughPrompt = config.settings.walkthroughPrompt;
-    const cacheKey = getNarrativeWalkthroughCacheKey(
+    const cacheKey = await getNarrativeWalkthroughCacheKey(
       state,
       agent,
       walkthroughModel,
@@ -1498,7 +1516,7 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
       options?.previousWalkthrough,
     );
     if (result.status === 'ready') {
-      const generatedCacheKey = getNarrativeWalkthroughCacheKey(
+      const generatedCacheKey = await getNarrativeWalkthroughCacheKey(
         state,
         agent,
         generatedModel,
@@ -1623,6 +1641,357 @@ ipcMain.handle('codiff:getDiffImageContent', async (event, request) => {
 ipcMain.handle('codiff:getRepositoryHistory', async (event, limit, source) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
   return listRepositoryHistory(repositoryPath, limit, source);
+});
+
+ipcMain.handle('codiff:getGitLabReviewVersions', async (event, request) => {
+  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
+  return listGitLabReviewVersions(repositoryPath, request.source);
+});
+
+ipcMain.handle('codiff:getGitLabReviewVersionCompare', async (event, request) => {
+  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
+  return compareGitLabReviewVersions(repositoryPath, request.source, {
+    fromId: request.fromId,
+    toId: request.toId,
+  });
+});
+
+ipcMain.handle('codiff:getGitLabReviewVersionUnitDiff', async (event, request) => {
+  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
+  return loadGitLabVersionCommitUnitDiff(repositoryPath, request.source, request.unit);
+});
+
+ipcMain.handle('codiff:getReviewVersions', async (event, request) => {
+  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
+  return listReviewVersions(repositoryPath, request.source);
+});
+
+ipcMain.handle('codiff:getReviewVersionCompare', async (event, request) => {
+  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
+  return compareReviewVersions(repositoryPath, request.source, {
+    ...(request.from ? { from: request.from } : {}),
+    ...(request.fromId ? { fromId: request.fromId } : {}),
+    ...(request.to ? { to: request.to } : {}),
+    ...(request.toId ? { toId: request.toId } : {}),
+  });
+});
+
+ipcMain.handle('codiff:getReviewVersionUnitDiff', async (event, request) => {
+  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
+  return loadReviewVersionUnitDiff(repositoryPath, request.source, request.unit);
+});
+
+/**
+ * @param {import('../core/types.ts').RepositoryState} state
+ * @param {import('../core/types.ts').GenerateLocalReviewWalkthroughRequest} request
+ * @param {ReturnType<typeof resolveWindowAgent>} agent
+ * @param {ReturnType<typeof getAgentOptions>} agentOptions
+ */
+const getLocalReviewWalkthroughCacheKey = (state, request, agent, agentOptions) =>
+  `local-review:${createHash('sha256')
+    .update(
+      JSON.stringify({
+        agent: agent.id,
+        comparison: request.versionCompare ?? null,
+        headSha: state.source.type === 'pull-request' ? (state.source.headSha ?? null) : null,
+        model: agent.normalizeModel(agentOptions.model),
+        prompt: config.settings.walkthroughPrompt,
+        source:
+          state.source.type === 'pull-request'
+            ? {
+                number: state.source.number ?? null,
+                provider: state.source.provider ?? null,
+                url: state.source.url,
+              }
+            : state.source,
+        structure: request.structure ?? 'auto',
+        unitId: request.unitId ?? null,
+        version: 1,
+      }),
+    )
+    .digest('hex')}`;
+
+ipcMain.handle('codiff:getStoredReviewWalkthrough', async (event, request) => {
+  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
+  const source = request?.source;
+  if (!source || source.type !== 'pull-request') {
+    return { status: 'missing' };
+  }
+  const state = await readRepositoryStateWithConfig(repositoryPath, source);
+  const agent = resolveWindowAgent(event.sender.id);
+  const agentOptions = getAgentOptions(agent);
+  const cacheKey = getLocalReviewWalkthroughCacheKey(state, request, agent, agentOptions);
+  const walkthrough = readStoredWalkthrough(cacheKey);
+  return walkthrough ? { status: 'ready', walkthrough } : { status: 'missing' };
+});
+
+ipcMain.handle('codiff:generateReviewWalkthrough', async (event, request) => {
+  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
+  const progressGeneration = (walkthroughProgressGenerations.get(event.sender.id) || 0) + 1;
+  walkthroughProgressGenerations.set(event.sender.id, progressGeneration);
+  const reportProgress = createWalkthroughProgressReporter(
+    event.sender,
+    () => walkthroughProgressGenerations.get(event.sender.id) === progressGeneration,
+  );
+  /** @param {import('../core/types.ts').WalkthroughGenerationProgress} progress */
+  const reportGenerationProgress = (progress) => reportProgress(progress);
+  const source = request?.source;
+  if (!source || source.type !== 'pull-request') {
+    return { reason: 'A pull request source is required.', status: 'failed' };
+  }
+
+  try {
+    const agent = resolveWindowAgent(event.sender.id);
+    const agentOptions = getAgentOptions(agent);
+    reportGenerationProgress({
+      phase: 'preparing',
+      summary: 'Loading review state.',
+    });
+    const wholeState = await readRepositoryStateWithConfig(repositoryPath, source);
+    const cacheKey = getLocalReviewWalkthroughCacheKey(wholeState, request, agent, agentOptions);
+    if (!request?.force) {
+      const cached = readStoredWalkthrough(cacheKey);
+      if (cached) {
+        return { status: 'ready', walkthrough: cached };
+      }
+    }
+
+    /** @type {Record<string, any>} */
+    const byUnitId = {};
+    /** @type {any} */
+    let evolution = null;
+    /** @type {import('../core/types.ts').ReviewPlan | null} */
+    let plan = null;
+    /** @type {any} */
+    let versionCompare = null;
+    /** @type {any} */
+    let promptOptions = {};
+
+    if (request?.versionCompare?.fromId && request?.versionCompare?.toId) {
+      reportGenerationProgress({
+        phase: 'preparing',
+        summary: 'Comparing the selected versions.',
+      });
+      const compared = await compareReviewVersions(repositoryPath, source, {
+        fromId: request.versionCompare.fromId,
+        toId: request.versionCompare.toId,
+      });
+      versionCompare = compared.versionCompare;
+      evolution = compared.versionCommitEvolution;
+      // Use compare files as the whole state for version-scoped generation.
+      wholeState.files = versionCompare.files;
+      promptOptions = {
+        versionCompareRange: {
+          fromLabel: versionCompare.from.range.head.label.text,
+          structure:
+            request.structure === 'commit-by-commit' || request.structure === 'units'
+              ? 'commit-by-commit'
+              : request.structure === 'whole-diff'
+                ? 'whole-diff'
+                : undefined,
+          toLabel: versionCompare.to.range.head.label.text,
+        },
+      };
+
+      if (
+        request.structure === 'commit-by-commit' ||
+        request.structure === 'units' ||
+        (request.structure === 'auto' &&
+          evolution?.recommendation?.suggestedStructure === 'commit-by-commit')
+      ) {
+        /** @type {Array<any>} */
+        const units = (evolution?.units || []).filter(
+          /** @param {any} unit */ (unit) =>
+            unit.reviewable && (!request.unitId || unit.id === request.unitId),
+        );
+        /** @type {Array<import('../core/types.ts').WalkthroughGenerationUnitProgress>} */
+        const progressUnits = units.map(
+          /** @param {any} unit */ (unit) => {
+            const commit = unit.after || unit.commit || unit.before;
+            return {
+              id: unit.id,
+              label: commit ? `${commit.shortSha} ${commit.subject}` : unit.id,
+              status: 'pending',
+            };
+          },
+        );
+        const reportUnitPreparation = (/** @type {string} */ summary) => {
+          reportGenerationProgress({
+            completed: progressUnits.filter(
+              (unit) => unit.status === 'ready' || unit.status === 'failed',
+            ).length,
+            phase: 'preparing',
+            summary,
+            total: progressUnits.length,
+            units: progressUnits.map((unit) => ({ ...unit })),
+          });
+        };
+        reportUnitPreparation(`Preparing ${units.length} commit diffs.`);
+        let nextUnitIndex = 0;
+        const materializeUnit = async () => {
+          while (true) {
+            const index = nextUnitIndex++;
+            if (index >= units.length) {
+              return;
+            }
+            const unit = units[index];
+            const progressUnit = progressUnits[index];
+            progressUnits[index] = {
+              ...progressUnit,
+              detail: 'Loading commit diff…',
+              status: 'generating',
+            };
+            reportUnitPreparation(`Preparing ${progressUnit.label}.`);
+            try {
+              const files = await loadReviewVersionUnitDiff(repositoryPath, source, unit);
+              byUnitId[unit.id] = {
+                ...wholeState,
+                files,
+              };
+              progressUnits[index] = { ...progressUnits[index], status: 'ready' };
+              reportUnitPreparation(`Prepared ${progressUnit.label}.`);
+            } catch {
+              progressUnits[index] = {
+                ...progressUnits[index],
+                detail: 'Commit diff could not be loaded.',
+                status: 'failed',
+              };
+              reportUnitPreparation(`Could not prepare ${progressUnit.label}.`);
+            }
+          }
+        };
+        await Promise.all(
+          Array.from({ length: Math.min(3, units.length) }, () => materializeUnit()),
+        );
+      }
+    } else if (
+      request.structure === 'commit-by-commit' ||
+      request.structure === 'units' ||
+      request.unitId
+    ) {
+      const history = await listRepositoryHistory(repositoryPath, 200, source);
+      const commitEntries = history.entries.filter((entry) => entry.scope !== 'base');
+      const units =
+        /** @type {Array<Extract<import('../core/types.ts').ReviewUnit, {kind: 'commit'}>>} */ (
+          commitEntries.map((entry, order) => ({
+            commit: {
+              authoredAt: new Date(entry.committedAt).toISOString(),
+              authorName: entry.author,
+              parentIds: entry.parents,
+              sha: entry.ref,
+              shortSha: entry.ref.slice(0, 7),
+              subject: entry.subject,
+            },
+            id: `commit:${entry.ref}`,
+            kind: 'commit',
+            order,
+            reviewable: true,
+          }))
+        ).filter((unit) => !request.unitId || unit.id === request.unitId);
+      plan = { structure: 'units', units };
+      reportGenerationProgress({
+        completed: 0,
+        phase: 'preparing',
+        summary: `Preparing ${units.length} commit diffs.`,
+        total: units.length,
+        units: units.map((unit) => ({
+          id: unit.id,
+          label: `${unit.commit.shortSha} ${unit.commit.subject}`,
+          status: 'pending',
+        })),
+      });
+      await Promise.all(
+        units.map(async (unit) => {
+          const commitState = await readRepositoryStateWithConfig(repositoryPath, {
+            ref: unit.commit.sha,
+            type: 'commit',
+          });
+          byUnitId[unit.id] = commitState;
+        }),
+      );
+    }
+
+    const result = await generateReviewWalkthroughShared({
+      agent: agent.id,
+      evolution,
+      plan,
+      promptOptions,
+      runModel: async ({ prompt, state }) => {
+        const timeoutMs = agent.defaultTimeoutMs || 600_000;
+        const response = await agent.run(
+          state.root,
+          prompt,
+          narrativeWalkthroughResponseSchema,
+          'walkthrough.json',
+          `${agent.label} walkthrough timed out.`,
+          {
+            ...agentOptions,
+            timeoutMs,
+          },
+        );
+        if (response && typeof response === 'object') {
+          return { draft: response };
+        }
+        const text = typeof response === 'string' ? response : String(response ?? '');
+        const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+        const raw = (fenced?.[1] || text).trim();
+        try {
+          return { draft: JSON.parse(raw) };
+        } catch {
+          return { draft: raw };
+        }
+      },
+      runOverviewModel: async ({ prompt }) => {
+        const timeoutMs = agent.defaultTimeoutMs || 600_000;
+        const response = await agent.run(
+          wholeState.root,
+          prompt,
+          versionCommitOverviewResponseSchema,
+          'walkthrough-overview.json',
+          `${agent.label} walkthrough overview timed out.`,
+          {
+            ...agentOptions,
+            timeoutMs,
+          },
+        );
+        const overview = /** @type {{ focus?: unknown }} */ (response);
+        if (typeof overview?.focus === 'string') {
+          return { focus: overview.focus };
+        }
+        throw new Error('The walkthrough overview did not include focus text.');
+      },
+      states: {
+        byUnitId,
+        whole: wholeState,
+      },
+      structure: request?.structure ?? 'auto',
+      onProgress: reportGenerationProgress,
+      unitConcurrency: 3,
+    });
+
+    if (result.status === 'ready') {
+      try {
+        writeStoredWalkthrough(cacheKey, result.walkthrough);
+      } catch {
+        // Persistence is optional; generation remains successful if the store is unavailable.
+      }
+      return { status: 'ready', walkthrough: result.walkthrough };
+    }
+    return { reason: result.reason, status: 'failed' };
+  } catch (error) {
+    const agent = resolveWindowAgent(event.sender.id);
+    if (agent.isNotFoundError?.(error)) {
+      return {
+        code: agent.notFoundCode,
+        reason: error instanceof Error ? error.message : String(error),
+        status: 'unavailable',
+      };
+    }
+    return {
+      reason: error instanceof Error ? error.message : String(error),
+      status: 'failed',
+    };
+  }
 });
 
 ipcMain.handle('codiff:getGitIdentity', async (event) => {

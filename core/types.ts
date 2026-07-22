@@ -237,10 +237,27 @@ export type CodiffFeatureFlags = {
   walkthroughSharing: boolean;
 };
 
+export type WalkthroughGenerationUnitProgress = {
+  detail?: string;
+  id: string;
+  label: string;
+  status: 'failed' | 'generating' | 'pending' | 'ready';
+};
+
+/** Host/agent progress for an in-flight walkthrough generation. */
+export type WalkthroughGenerationProgress = {
+  completed?: number;
+  phase: 'combining' | 'generating' | 'generating-units' | 'preparing';
+  summary: string;
+  total?: number;
+  units?: ReadonlyArray<WalkthroughGenerationUnitProgress>;
+};
+
 export type WalkthroughProgressPhase = 'agent-generation' | 'response-received';
 
 export type WalkthroughProgressEvent = {
-  phase: WalkthroughProgressPhase;
+  generation?: WalkthroughGenerationProgress;
+  phase?: WalkthroughProgressPhase;
 };
 
 export type CodiffMarkdownDocument = {
@@ -564,6 +581,9 @@ export type ReviewEvolutionMarkerUnit = {
 
 export type ReviewEvolutionUnit = ReviewUnit | ReviewEvolutionMarkerUnit;
 
+/** Classification of a commit while comparing two review versions. */
+export type VersionCommitKind = Exclude<ReviewEvolutionUnit['kind'], 'commit'>;
+
 export type ReviewEvolutionSummary = {
   absorbedIntoBase: number;
   added: number;
@@ -885,6 +905,8 @@ export type WalkthroughChapter = {
     sha: string;
     shortSha: string;
     subject: string;
+    /** Classification when this boundary is a commit from the later comparison version. */
+    versionCommitKind?: VersionCommitKind;
     webUrl?: string;
   };
   icon: WalkthroughIcon;
@@ -1107,7 +1129,6 @@ export type PullRequestReviewComment = {
   body: string;
   filePath: string;
   lineNumber?: number;
-  sectionId?: string;
   side?: 'additions' | 'deletions';
   startLineNumber?: number;
   startSide?: 'additions' | 'deletions';
@@ -1199,3 +1220,87 @@ export type SubmitPullRequestReviewRequest = {
   event: PullRequestReviewEvent;
   source: Extract<ReviewSource, { type: 'pull-request' }>;
 };
+
+export type GitLabReviewVersionsRequest = {
+  source: Extract<ReviewSource, { type: 'pull-request' }>;
+};
+
+export type GitLabReviewVersionCompareRequest = {
+  from?: ReviewVersionCompareEndpoint;
+  fromId?: string;
+  source: Extract<ReviewSource, { type: 'pull-request' }>;
+  to?: ReviewVersionCompareEndpoint;
+  toId?: string;
+};
+
+export type ReviewVersionCompareEndpoint =
+  | { id: string; kind: 'version' }
+  | { kind: 'base' }
+  | { kind: 'head-sha'; sha: string }
+  | {
+      baseSha: string;
+      commentId: string;
+      headSha: string;
+      kind: 'comment-position';
+      startSha: string;
+    };
+
+export type GitLabReviewVersionCompareResult = {
+  versionCommitEvolution: ReviewCommitEvolution | null;
+  versionCommitEvolutionError: string | null;
+  versionCompare: DiffComparisonView;
+  warning?: string | null;
+};
+
+export type GitLabReviewVersionUnitDiffRequest = {
+  source: Extract<ReviewSource, { type: 'pull-request' }>;
+  unit: ReviewEvolutionUnit;
+};
+
+/** Provider-neutral aliases used by the local review host. */
+export type ReviewVersionsRequest = GitLabReviewVersionsRequest;
+export type ReviewVersionCompareRequest = GitLabReviewVersionCompareRequest;
+export type ReviewVersionCompareResult = GitLabReviewVersionCompareResult & {
+  warning?: string | null;
+};
+export type ReviewVersionUnitDiffRequest = GitLabReviewVersionUnitDiffRequest;
+export type ReviewVersionsResult = {
+  versions: ReadonlyArray<ReviewVersionOption>;
+  warning?: string | null;
+};
+
+export type GenerateLocalReviewWalkthroughRequest = {
+  force?: boolean;
+  source: Extract<ReviewSource, { type: 'pull-request' }>;
+  structure?: 'auto' | 'commit-by-commit' | 'whole-diff' | 'units';
+  unitId?: string;
+  versionCompare?: {
+    fromId: string;
+    toId: string;
+  };
+};
+
+export type StoredLocalReviewWalkthroughRequest = Omit<
+  GenerateLocalReviewWalkthroughRequest,
+  'force' | 'unitId'
+>;
+
+export type StoredLocalReviewWalkthroughResult =
+  | {
+      status: 'ready';
+      walkthrough: NarrativeWalkthrough;
+    }
+  | {
+      status: 'missing';
+    };
+
+export type GenerateLocalReviewWalkthroughResult =
+  | {
+      status: 'ready';
+      walkthrough: NarrativeWalkthrough;
+    }
+  | {
+      code?: string;
+      reason: string;
+      status: 'failed' | 'unavailable';
+    };

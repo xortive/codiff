@@ -244,7 +244,7 @@ test('switching edited Markdown back to a diff flushes and refreshes it first', 
       ({ textContent }) => textContent === 'View as Diff',
     );
     expect(diffButton).not.toBeUndefined();
-    expect(diffButton?.classList.contains('codiff-button')).toBe(true);
+    expect(diffButton?.classList.contains('codiff-markdown-button')).toBe(true);
 
     await act(async () => {
       diffButton?.click();
@@ -398,7 +398,7 @@ test('combined branch-only Markdown sections remain read-only', async () => {
     });
 
     await waitFor(() => {
-      expect(container.querySelector('[aria-label="Preview plan.md"]')).not.toBeNull();
+      expect(container.querySelector('.codiff-markdown-preview:not(.editable)')).not.toBeNull();
     });
     expect(container.querySelector('[aria-label="Edit plan.md"]')).toBeNull();
   } finally {
@@ -786,7 +786,7 @@ test('read-only review comments render safe details blocks', async () => {
   } satisfies ReviewComment;
 
   const view = await renderReact(
-    <ReviewCodeViewHarness comments={[comment]} files={[file]} supportsReviewCommentActions />,
+    <ReviewCodeViewHarness comments={[comment]} files={[file]} isPullRequest />,
   );
 
   try {
@@ -1360,11 +1360,12 @@ test('failed pull request comments keep their draft and can be retried', async (
   const onUpdateComment = vi.fn();
   const view = await renderReact(
     <ReviewCodeViewHarness
+      canSubmitReviewComments
       comments={[comment]}
       files={[file]}
+      isPullRequest
       onSubmitComment={onSubmitComment}
       onUpdateComment={onUpdateComment}
-      supportsReviewCommentActions
     />,
   );
 
@@ -1408,10 +1409,10 @@ test('working-tree share comments support the Comment button and Mod+Enter', asy
   const onSubmitComment = vi.fn();
   const view = await renderReact(
     <ReviewCodeViewHarness
+      canSubmitReviewComments
       comments={[comment]}
       files={[file]}
       onSubmitComment={onSubmitComment}
-      supportsReviewCommentActions
     />,
   );
 
@@ -1460,9 +1461,9 @@ test('file comments can be created for GitLab merge requests but not GitHub pull
   const view = await renderReact(
     <ReviewCodeViewHarness
       files={[file]}
+      isPullRequest
       onCreateComment={onCreateComment}
       source={gitLabSource}
-      supportsReviewCommentActions
     />,
   );
 
@@ -1471,7 +1472,7 @@ test('file comments can be created for GitLab merge requests but not GitHub pull
       '.codiff-file-comment-button',
     );
     expect(fileCommentButton).not.toBeNull();
-    expect(fileCommentButton?.classList.contains('codiff-button')).toBe(true);
+    expect(fileCommentButton?.classList.contains('codiff-file-comment-button')).toBe(true);
 
     await act(async () => fileCommentButton?.click());
     expect(onCreateComment).toHaveBeenCalledWith({
@@ -1483,9 +1484,9 @@ test('file comments can be created for GitLab merge requests but not GitHub pull
     await view.rerender(
       <ReviewCodeViewHarness
         files={[file]}
+        isPullRequest
         onCreateComment={onCreateComment}
         source={gitHubSource}
-        supportsReviewCommentActions
       />,
     );
     expect(view.container.querySelector('.codiff-file-comment-button')).toBeNull();
@@ -1510,12 +1511,12 @@ test('file-level review comments render as measured file annotations', async () 
         },
       ]}
       files={[file]}
+      isPullRequest
       source={{
         provider: 'gitlab',
         type: 'pull-request',
         url: 'https://gitlab.example.com/group/project/-/merge_requests/1',
       }}
-      supportsReviewCommentActions
     />,
   );
 
@@ -1632,7 +1633,7 @@ test('Enter on a focused review control is not converted into a hunk comment', a
       render(1);
     });
 
-    const openButton = container.querySelector<HTMLButtonElement>('.codiff-button');
+    const openButton = container.querySelector<HTMLButtonElement>('.codiff-open-button');
     if (!openButton) {
       throw new Error('Expected the open file button.');
     }

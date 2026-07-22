@@ -1,4 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import type { FileTreeRowDecorationRenderer } from '@pierre/trees';
+import { FileTree, useFileTree } from '@pierre/trees/react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  type MouseEvent,
+  type RefObject,
+} from 'react';
 import { matchesShortcut } from '../../config/keymap.ts';
 import type { CodiffKeymap } from '../../config/types.ts';
 import type {
@@ -9,16 +19,17 @@ import type {
 } from '../../lib/app-types.ts';
 import {
   formatLineCountNumber,
+  formatTreeLineCount,
   getDiffLineCount,
   getDiffLineCountTitle,
   getTotalDiffLineCount,
 } from '../../lib/diff.ts';
+import { fileTreeSort, statusForTree } from '../../lib/files.ts';
 import { isNativeInputTarget } from '../../lib/keyboard.ts';
 import { getShortRef, getSourceKey } from '../../lib/source.ts';
 import type { ChangedFile, HistoryEntry, NarrativeWalkthrough, ReviewSource } from '../../types.ts';
 import { Avatar } from './Avatar.tsx';
-import { Button } from './Button.tsx';
-import { ReviewFileTree } from './FileTree.tsx';
+import { CommitRefTooltip } from './CommitRefTooltip.tsx';
 import { NarrativeSidebar } from './walkthrough/NarrativeSidebar.tsx';
 import type { NarrativeNavigation } from './walkthrough/useNarrativeNavigation.ts';
 import { WalkthroughProgress } from './walkthrough/WalkthroughProgress.tsx';
@@ -38,7 +49,9 @@ export function Sidebar({
   narrativeWalkthrough,
   onActivatePath,
   onLoadMoreHistory,
+  onModeChange,
   onSearchQueryChange,
+  onSelectPath,
   onSelectSource,
   onShareWalkthrough,
   onToggleCommitView,
@@ -51,7 +64,9 @@ export function Sidebar({
   viewed,
   walkthroughError,
   walkthroughLoading,
+  walkthroughOutdatedPaths,
   walkthroughProgress,
+  walkthroughUnread,
 }: {
   branchSource: Extract<ReviewSource, { type: 'branch-diff' }> | null;
   commitFiles: ReadonlyArray<ChangedFile>;
@@ -67,7 +82,9 @@ export function Sidebar({
   narrativeWalkthrough: NarrativeWalkthrough | null;
   onActivatePath: (path: string) => void;
   onLoadMoreHistory: () => void;
+  onModeChange: (mode: SidebarMode) => void;
   onSearchQueryChange: (query: string) => void;
+  onSelectPath: (path: string) => void;
   onSelectSource: (source: ReviewSource) => void;
   onShareWalkthrough?: () => void;
   onToggleCommitView: () => void;
@@ -80,13 +97,21 @@ export function Sidebar({
   viewed: Record<string, string>;
   walkthroughError: WalkthroughError | null;
   walkthroughLoading: boolean;
+  walkthroughOutdatedPaths: ReadonlySet<string>;
   walkthroughProgress: {
     phase: import('../../types.ts').WalkthroughProgressPhase | null;
     responseLabelIndex: number;
     stageRevision: number;
   };
+  walkthroughUnread: boolean;
 }) {
+  const allowSelectionScroll = useRef(false);
+  const allowSelectionScrollTimer = useRef<number | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const treeHostRef = useRef<HTMLDivElement>(null);
+  const suppressSelectionChange = useRef(false);
+  const paths = useMemo(() => files.map((file) => file.path), [files]);
+  const filePathSet = useMemo(() => new Set(paths), [paths]);
   const lineCountsByPath = useMemo(
     () => new Map(files.map((file) => [file.path, getDiffLineCount(file, showWhitespace)])),
     [files, showWhitespace],
@@ -99,6 +124,153 @@ export function Sidebar({
   const showCommitButton =
     mode === 'tree' && currentSource.type === 'working-tree' && commitFiles.length > 0;
   const showFooter = showTotalLineCount || showCommitButton;
+  const lineCountsByPathRef = useRef(lineCountsByPath);
+  const reloadDeltaGitStatusCSS = useMemo(
+    () => getReloadDeltaGitStatusCSS(reloadDeltaPaths),
+    [reloadDeltaPaths],
+  );
+  const viewedRowCSS = useMemo(() => getViewedRowCSS(files, viewed), [files, viewed]);
+  const renderTreeRowDecoration = useCallback<FileTreeRowDecorationRenderer>(({ item }) => {
+    const lineCount = lineCountsByPathRef.current.get(item.path);
+    return lineCount?.countable
+      ? {
+          text: formatTreeLineCount(lineCount),
+          title: getDiffLineCountTitle(lineCount),
+        }
+      : null;
+  }, []);
+  const status = useMemo(
+    () =>
+      files.map((file) => ({
+        path: file.path,
+        status: statusForTree[file.status],
+      })),
+    [files],
+  );
+  const { model } = useFileTree({
+    flattenEmptyDirectories: true,
+    gitStatus: status,
+    initialExpansion: 'open',
+    initialSelectedPaths: selectedPath ? [selectedPath] : [],
+    itemHeight: 30,
+    onSelectionChange: (paths) => {
+      if (suppressSelectionChange.current) {
+        return;
+      }
+
+      if (!allowSelectionScroll.current) {
+        return;
+      }
+      allowSelectionScroll.current = false;
+      if (allowSelectionScrollTimer.current != null) {
+        window.clearTimeout(allowSelectionScrollTimer.current);
+        allowSelectionScrollTimer.current = null;
+      }
+
+      const path = paths.at(-1);
+      if (path) {
+        onSelectPath(path);
+      }
+    },
+    paths,
+    renderRowDecoration: renderTreeRowDecoration,
+    sort: fileTreeSort,
+    unsafeCSS: `
+      :host {
+        --trees-bg-override: transparent;
+        --trees-bg-muted-override: var(--hover-wash);
+        --trees-border-color-override: var(--sidebar-border);
+        --trees-fg-muted-override: var(--muted);
+        --trees-fg-override: var(--sidebar-text);
+        --trees-focus-ring-color-override: var(--tree-selection-focus);
+        --trees-padding-inline-override: 4px;
+        --trees-search-bg-override: rgb(127 127 127 / 0.1);
+        --trees-search-fg-override: var(--sidebar-text);
+        --trees-selected-bg-override: color-mix(in srgb, var(--tree-selection-bg) 46%, transparent);
+        --trees-selected-fg-override: var(--sidebar-text);
+        --trees-selected-focused-border-color-override: color-mix(in srgb, var(--tree-selection-focus) 42%, transparent);
+        --truncate-marker-background-color: transparent;
+        color-scheme: var(--codiff-tree-color-scheme, light dark);
+        color: var(--sidebar-text);
+        font: 13px/1.35 var(--font-sans);
+      }
+
+      button[data-type='item'] {
+        background-color: transparent;
+        border-radius: 14px;
+        corner-shape: squircle;
+      }
+
+      [data-item-section='decoration'] {
+        color: var(--muted);
+        font: 600 10px/1 var(--font-mono);
+        letter-spacing: 0;
+      }
+    `,
+  });
+
+  useTreeShadowStyle(treeHostRef, reloadDeltaGitStatusStyleAttribute, reloadDeltaGitStatusCSS);
+  useTreeShadowStyle(treeHostRef, viewedRowStyleAttribute, viewedRowCSS);
+
+  useLayoutEffect(() => {
+    lineCountsByPathRef.current = lineCountsByPath;
+    if (model.getFileTreeContainer()) {
+      model.render({});
+    }
+  }, [lineCountsByPath, model]);
+
+  useEffect(() => {
+    model.resetPaths(paths);
+  }, [model, paths]);
+
+  useEffect(() => {
+    model.setGitStatus(status);
+  }, [model, status]);
+
+  const scrollPathIntoView = useCallback(
+    (path: string) => {
+      model.focusPath(path);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const host = treeHostRef.current?.querySelector('file-tree-container');
+          const row = Array.from(
+            host?.shadowRoot?.querySelectorAll<HTMLElement>('[data-item-path]') ?? [],
+          ).find((element) => element.getAttribute('data-item-path') === path);
+          row?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+          });
+        });
+      });
+    },
+    [model],
+  );
+
+  const handleTreeClick = useCallback(
+    (event: MouseEvent<HTMLElement>) => {
+      for (const target of event.nativeEvent.composedPath()) {
+        if (!('getAttribute' in target) || typeof target.getAttribute !== 'function') {
+          continue;
+        }
+
+        const path = target.getAttribute('data-item-path');
+        if (path && filePathSet.has(path)) {
+          onActivatePath(path);
+          return;
+        }
+      }
+    },
+    [filePathSet, onActivatePath],
+  );
+
+  useEffect(
+    () => () => {
+      if (allowSelectionScrollTimer.current != null) {
+        window.clearTimeout(allowSelectionScrollTimer.current);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -112,6 +284,27 @@ export function Sidebar({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [keymap]);
+
+  useEffect(() => {
+    if (!selectedPath) {
+      return;
+    }
+
+    const selectedPaths = model.getSelectedPaths();
+    if (selectedPaths.length === 1 && selectedPaths[0] === selectedPath) {
+      return;
+    }
+
+    suppressSelectionChange.current = true;
+    for (const path of selectedPaths) {
+      model.getItem(path)?.deselect();
+    }
+    model.getItem(selectedPath)?.select();
+    requestAnimationFrame(() => scrollPathIntoView(selectedPath));
+    window.setTimeout(() => {
+      suppressSelectionChange.current = false;
+    }, 0);
+  }, [model, scrollPathIntoView, selectedPath]);
 
   return (
     <>
@@ -127,6 +320,33 @@ export function Sidebar({
           value={searchQuery}
         />
       </div>
+      <div aria-label="Review order" className="sidebar-mode-toggle" role="tablist">
+        <button
+          aria-selected={mode === 'tree'}
+          onClick={() => onModeChange('tree')}
+          role="tab"
+          type="button"
+        >
+          Tree
+        </button>
+        <button
+          aria-selected={mode === 'walkthrough'}
+          onClick={() => onModeChange('walkthrough')}
+          role="tab"
+          type="button"
+        >
+          <span>Walkthrough</span>
+          {walkthroughUnread ? <span aria-hidden className="sidebar-tab-dot" /> : null}
+        </button>
+        <button
+          aria-selected={mode === 'history'}
+          onClick={() => onModeChange('history')}
+          role="tab"
+          type="button"
+        >
+          History
+        </button>
+      </div>
       {mode === 'history' ? (
         <HistorySidebar
           branchSource={branchSource}
@@ -141,6 +361,7 @@ export function Sidebar({
         />
       ) : mode === 'walkthrough' && narrativeWalkthrough ? (
         <NarrativeSidebar
+          changedPaths={walkthroughOutdatedPaths}
           files={commitFiles}
           navigation={narrativeNavigation}
           onShareWalkthrough={onShareWalkthrough}
@@ -168,15 +389,9 @@ export function Sidebar({
           ) : null}
         </>
       ) : (
-        <ReviewFileTree
-          files={files}
-          onActivatePath={onActivatePath}
-          reloadDeltaPaths={reloadDeltaPaths}
-          scrollSelectedPathIntoView
-          selectedPath={selectedPath}
-          showWhitespace={showWhitespace}
-          viewed={viewed}
-        />
+        <div className="file-tree-shell" ref={treeHostRef}>
+          <FileTree className="file-tree" model={model} onClick={handleTreeClick} />
+        </div>
       )}
       {showFooter ? (
         <div className="sidebar-total-row">
@@ -193,20 +408,110 @@ export function Sidebar({
             ) : null}
           </span>
           {showCommitButton ? (
-            <Button
+            <button
               aria-label={commitViewOpen ? 'Show file tree' : 'Open commit view'}
-              className="sidebar-commit-button"
+              className="codiff-open-button sidebar-commit-button"
               onClick={onToggleCommitView}
               type="button"
             >
               {commitViewOpen ? 'Tree' : 'Commit'}
-            </Button>
+            </button>
           ) : null}
         </div>
       ) : null}
     </>
   );
 }
+
+const escapeCSSString = (value: string) =>
+  value
+    .replaceAll('\\', String.raw`\\`)
+    .replaceAll('\n', String.raw`\a `)
+    .replaceAll('\r', String.raw`\d `)
+    .replaceAll('\f', String.raw`\c `)
+    .replaceAll('"', String.raw`\"`);
+
+const getReloadDeltaGitStatusCSS = (paths: ReadonlySet<string>) =>
+  [...paths]
+    .map(
+      (path) => `
+        [data-item-path="${escapeCSSString(path)}"][data-item-git-status] > [data-item-section='git'] {
+          color: var(--sidebar-ref);
+        }
+      `,
+    )
+    .join('\n');
+
+const getViewedRowCSS = (files: ReadonlyArray<ChangedFile>, viewed: Record<string, string>) =>
+  getViewedRowCSSFromSelectors(
+    files
+      .filter((file) => viewed[file.path] === file.fingerprint)
+      .map((file) => `[data-item-path="${escapeCSSString(file.path)}"]`),
+  );
+
+const getViewedRowCSSFromSelectors = (selectors: ReadonlyArray<string>) => {
+  if (selectors.length === 0) {
+    return '';
+  }
+
+  const rowContent = selectors
+    .flatMap((selector) => [
+      `${selector} > [data-item-section='icon']`,
+      `${selector} > [data-item-section='icon'] > :where(:not([data-icon-name='file-tree-icon-chevron']))`,
+      `${selector} > [data-item-section='content']`,
+      `${selector} > [data-item-section='decoration']`,
+      `${selector} > [data-item-section='git']`,
+    ])
+    .join(',\n');
+
+  return `
+    ${rowContent} {
+      color: var(--muted);
+    }
+  `;
+};
+
+const reloadDeltaGitStatusStyleAttribute = 'data-codiff-reload-delta-git-status';
+const viewedRowStyleAttribute = 'data-codiff-viewed-rows';
+
+const useTreeShadowStyle = (
+  treeHostRef: RefObject<HTMLElement | null>,
+  styleAttribute: string,
+  css: string,
+) => {
+  useEffect(() => {
+    // Tree unsafeCSS is constructor-time; keep dynamic row styling in a shadow style tag.
+    if (syncTreeShadowStyle(treeHostRef.current, styleAttribute, css)) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      syncTreeShadowStyle(treeHostRef.current, styleAttribute, css);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [css, styleAttribute, treeHostRef]);
+};
+
+const syncTreeShadowStyle = (treeHost: HTMLElement | null, styleAttribute: string, css: string) => {
+  const shadowRoot = treeHost?.querySelector('file-tree-container')?.shadowRoot;
+  if (!shadowRoot) {
+    return false;
+  }
+
+  const existingStyle = shadowRoot.querySelector<HTMLStyleElement>(`style[${styleAttribute}]`);
+  if (css.length === 0) {
+    existingStyle?.remove();
+    return true;
+  }
+
+  const style = existingStyle ?? document.createElement('style');
+  style.setAttribute(styleAttribute, '');
+  style.textContent = css;
+  if (!existingStyle) {
+    shadowRoot.append(style);
+  }
+  return true;
+};
 
 const shortDate = (timestamp: number) => {
   const seconds = Math.floor((Date.now() - timestamp) / 1000);
@@ -254,6 +559,20 @@ function HistorySidebar({
   searchQuery: string;
 }) {
   const currentSourceKey = getSourceKey(currentSource);
+  const getGitLabCommitUrl = (ref: string) => {
+    if (
+      currentSource.type !== 'pull-request' ||
+      currentSource.provider !== 'gitlab' ||
+      !currentSource.projectPath
+    ) {
+      return undefined;
+    }
+    try {
+      return `${new URL(currentSource.url).origin}/${currentSource.projectPath}/-/commit/${encodeURIComponent(ref)}`;
+    } catch {
+      return undefined;
+    }
+  };
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const listRef = useRef<HTMLDivElement>(null);
   const rows = useMemo(() => {
@@ -333,33 +652,11 @@ function HistorySidebar({
               author: null,
               committedAt: null,
               gravatarUrl: undefined,
-              key: getSourceKey({
-                baseRef: branchSource.baseRef,
-                headRef: branchSource.headRef,
-                ref: branchSource.ref,
-                type: 'branch-working-tree',
-              }),
-              kind: 'entry' as const,
-              ref: 'branch+',
-              source: {
-                baseRef: branchSource.baseRef,
-                headRef: branchSource.headRef,
-                ref: branchSource.ref,
-                type: 'branch-working-tree',
-              } satisfies ReviewSource,
-              subject: `All changes vs ${branchSource.ref}`,
-            }
-          : null,
-        !normalizedQuery
-          ? {
-              author: null,
-              committedAt: null,
-              gravatarUrl: undefined,
               key: getSourceKey(branchSource),
               kind: 'entry' as const,
               ref: 'branch',
               source: branchSource satisfies ReviewSource,
-              subject: `Committed only vs ${branchSource.ref}`,
+              subject: `Branch diff vs ${branchSource.ref}`,
             }
           : null,
         localRows.length > 0
@@ -423,13 +720,24 @@ function HistorySidebar({
             type="button"
           >
             <span className="history-entry-ref">
-              {row.source.type === 'commit'
-                ? getShortRef(row.source.ref)
-                : row.source.type === 'pull-request' ||
-                    row.source.type === 'branch-diff' ||
-                    row.source.type === 'branch-working-tree'
-                  ? row.ref
-                  : 'local'}
+              {row.source.type === 'commit' ? (
+                <CommitRefTooltip
+                  commit={{
+                    authoredAt: row.committedAt,
+                    authorName: row.author ?? undefined,
+                    sha: row.source.ref,
+                    shortSha: getShortRef(row.source.ref),
+                    subject: row.subject,
+                    webUrl: getGitLabCommitUrl(row.source.ref),
+                  }}
+                  focusable={false}
+                  linkTrigger={false}
+                />
+              ) : row.source.type === 'pull-request' || row.source.type === 'branch-diff' ? (
+                row.ref
+              ) : (
+                'local'
+              )}
             </span>
             <span className="history-entry-subject">{row.subject}</span>
             {hasMetadata ? (

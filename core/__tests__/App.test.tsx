@@ -8,6 +8,7 @@ import {
   getSectionForFileDiff,
   getTotalDiffLineCount,
   getVisibleDiffSections,
+  formatTreeLineCount,
   fileHasVisibleDiff,
   loadSectionContents,
   shouldLoadDiffSectionContents,
@@ -395,6 +396,16 @@ test('diff line counts include additions and deletions across sections', () => {
     countable: true,
     deletions: 1,
   });
+});
+
+test('tree line counts keep additions and deletions separate', () => {
+  expect(
+    formatTreeLineCount({
+      additions: 1234,
+      countable: true,
+      deletions: 56,
+    }),
+  ).toBe('+1.2k -56');
 });
 
 test('diff line counts omit binary summary rows', () => {

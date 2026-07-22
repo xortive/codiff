@@ -29,7 +29,7 @@
   "type": "module",
   "main": "./electron/main.cjs",
   "scripts": {
-    "build": "vp run --filter '@nkzw/codiff-core' build && vp run --filter '@nkzw/codiff-gitlab' build && vp run --filter '@nkzw/codiff-service' build && vp run --filter '@nkzw/codiff-web' build && vp build",
+    "build": "vp run --filter '@nkzw/codiff-core' build && vp run --filter '@nkzw/codiff-gitlab' build && vp run --filter '@nkzw/codiff-github' build && vp run --filter '@nkzw/codiff-service' build && vp run --filter '@nkzw/codiff-web' build && vp build",
     "codiff": "node ./bin/codiff.js",
     "dev": "vp dev --host 127.0.0.1",
     "dev:app": "ELECTRON_RENDERER_URL=http://127.0.0.1:5173 node ./bin/codiff.js",
@@ -48,6 +48,7 @@
     "test:integration": "vp run build && vp test -c vitest.cloudflare.config.ts"
   },
   "dependencies": {
+    "codiff": "link:",
     "electron-squirrel-startup": "^1.0.1",
     "node-pty": "^1.1.0",
     "proper-lockfile": "^4.1.2"

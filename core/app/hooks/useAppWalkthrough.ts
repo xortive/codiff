@@ -51,7 +51,7 @@ export function useAppWalkthrough({
   );
   const [walkthroughLoading, setWalkthroughLoading] = useState(false);
   const [walkthroughProgress, setWalkthroughProgress] = useState<{
-    phase: WalkthroughProgressEvent['phase'] | null;
+    phase: NonNullable<WalkthroughProgressEvent['phase']> | null;
     responseLabelIndex: number;
     stageRevision: number;
   }>({ phase: null, responseLabelIndex: -1, stageRevision: 0 });
@@ -93,11 +93,15 @@ export function useAppWalkthrough({
   useEffect(
     () =>
       window.codiff.onWalkthroughProgress((progress) => {
+        const phase = progress.phase;
+        if (!phase) {
+          return;
+        }
         setWalkthroughProgress((current) =>
-          current.phase === progress.phase
+          current.phase === phase
             ? current
             : {
-                phase: progress.phase,
+                phase,
                 responseLabelIndex: current.responseLabelIndex,
                 stageRevision: current.stageRevision + 1,
               },

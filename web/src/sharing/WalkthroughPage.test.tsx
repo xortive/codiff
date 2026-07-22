@@ -179,3 +179,53 @@ test('optimistically adds walkthrough-level comments and replies', async () => {
     view: {},
   });
 });
+
+test('persists diff comments using provider-neutral line coordinates', async () => {
+  await act(async () => {
+    root.render(
+      <Suspense fallback={null}>
+        <WalkthroughPage slug="optimistic-walkthrough" />
+      </Suspense>,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  const commenting = rendered.props?.commenting as {
+    onSubmitComment(comment: {
+      body: string;
+      filePath: string;
+      lineNumber: number;
+      side: 'additions';
+    }): Promise<unknown>;
+  };
+  await commenting.onSubmitComment({
+    body: 'Review this line.',
+    filePath: 'src/review.ts',
+    lineNumber: 12,
+    side: 'additions',
+  });
+
+  expect(fate.client.mutations.shareComment.createThread).toHaveBeenCalledWith(
+    expect.objectContaining({
+      input: {
+        body: 'Review this line.',
+        shareId: 'walkthrough-id',
+        shareType: 'walkthrough',
+        target: {
+          filePath: 'src/review.ts',
+          kind: 'walkthrough-diff',
+          lineNumber: 12,
+          side: 'additions',
+        },
+      },
+      optimistic: expect.objectContaining({
+        filePath: 'src/review.ts',
+        kind: 'walkthrough-diff',
+        lineNumber: 12,
+        sectionId: null,
+        side: 'additions',
+      }),
+      view: {},
+    }),
+  );
+});

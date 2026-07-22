@@ -12,7 +12,8 @@ export const getItemId = (section: DiffSection) => `diff:${section.id}`;
 
 export const isMarkdownFilePath = (path: string) => /\.md$/i.test(path);
 
-const isImageFilePath = (path: string) => /\.(?:apng|avif|bmp|gif|ico|jpe?g|png|webp)$/i.test(path);
+export const isImageFilePath = (path: string) =>
+  /\.(?:apng|avif|bmp|gif|ico|jpe?g|png|webp)$/i.test(path);
 
 export const canRenderImagePreview = (path: string, section: DiffSection) =>
   isImageFilePath(path) &&
@@ -52,7 +53,7 @@ const fileDiffSectionLookup = new WeakMap<
 export const getSectionForFileDiff = (fileDiff: FileDiffMetadata) =>
   fileDiffSectionLookup.get(fileDiff);
 
-const getLoadedSectionContents = (file: ChangedFile, section: DiffSection) =>
+export const getLoadedSectionContents = (file: ChangedFile, section: DiffSection) =>
   loadedSectionContents.get(getLoadedContentsKey(file, section));
 
 export const loadSectionContents = (
@@ -218,7 +219,7 @@ export const getTotalDiffLineCount = (lineCounts: Iterable<DiffLineCount>): Diff
 
 export const formatLineCountNumber = (value: number) => value.toLocaleString('en-US');
 
-const formatCompactLineCountNumber = (value: number) => {
+export const formatCompactLineCountNumber = (value: number) => {
   if (value < 1000) {
     return String(value);
   }
@@ -237,7 +238,7 @@ const formatCompactLineCountNumber = (value: number) => {
 export const formatTreeLineCount = ({ additions, deletions }: DiffLineCount) =>
   `+${formatCompactLineCountNumber(additions)} -${formatCompactLineCountNumber(deletions)}`;
 
-const pluralizeLine = (count: number) => (count === 1 ? 'line' : 'lines');
+export const pluralizeLine = (count: number) => (count === 1 ? 'line' : 'lines');
 
 export const getDiffLineCountTitle = ({ additions, deletions }: DiffLineCount) =>
   `${formatLineCountNumber(additions)} added ${pluralizeLine(

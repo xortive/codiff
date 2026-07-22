@@ -6,10 +6,10 @@
  */
 export type GitLabTransport = {
   request<T>(request: {
+    body?: unknown;
     method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
     path: string;
     query?: Readonly<Record<string, boolean | number | string>>;
-    body?: unknown;
   }): Promise<T>;
   /**
    * Optional paginated reader. When omitted, {@link request} is called with
@@ -31,16 +31,20 @@ export type FakeGitLabTransportRoute = {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
   path: string;
   query?: Readonly<Record<string, boolean | number | string>>;
-  response: unknown | ((request: {
-    method: string;
-    path: string;
-    query?: Readonly<Record<string, boolean | number | string>>;
-  }) => unknown | Promise<unknown>);
-  text?: string | ((request: {
-    method: string;
-    path: string;
-    query?: Readonly<Record<string, boolean | number | string>>;
-  }) => string | Promise<string>);
+  response:
+    | unknown
+    | ((request: {
+        method: string;
+        path: string;
+        query?: Readonly<Record<string, boolean | number | string>>;
+      }) => unknown | Promise<unknown>);
+  text?:
+    | string
+    | ((request: {
+        method: string;
+        path: string;
+        query?: Readonly<Record<string, boolean | number | string>>;
+      }) => string | Promise<string>);
 };
 
 const queryKey = (query?: Readonly<Record<string, boolean | number | string>>) =>
@@ -56,14 +60,20 @@ const queryKey = (query?: Readonly<Record<string, boolean | number | string>>) =
  */
 export const createFakeGitLabTransport = (
   routes: ReadonlyArray<FakeGitLabTransportRoute>,
-): GitLabTransport & { calls: Array<{ method: string; path: string; query?: Record<string, boolean | number | string> }> } => {
+): GitLabTransport & {
+  calls: Array<{ method: string; path: string; query?: Record<string, boolean | number | string> }>;
+} => {
   const calls: Array<{
     method: string;
     path: string;
     query?: Record<string, boolean | number | string>;
   }> = [];
 
-  const matchRoute = (method: string, path: string, query?: Readonly<Record<string, boolean | number | string>>) => {
+  const matchRoute = (
+    method: string,
+    path: string,
+    query?: Readonly<Record<string, boolean | number | string>>,
+  ) => {
     const key = queryKey(query);
     return (
       routes.find(
@@ -89,7 +99,9 @@ export const createFakeGitLabTransport = (
       });
       const route = matchRoute(method, request.path, request.query);
       if (!route) {
-        throw new Error(`No fake GitLab route for ${method} ${request.path}?${queryKey(request.query)}`);
+        throw new Error(
+          `No fake GitLab route for ${method} ${request.path}?${queryKey(request.query)}`,
+        );
       }
       const response =
         typeof route.response === 'function'
@@ -103,7 +115,9 @@ export const createFakeGitLabTransport = (
       let page = 1;
       while (page < 50) {
         const pageQuery = { ...(request.query ?? {}), page, per_page: 100 };
-        const route = matchRoute('GET', request.path, pageQuery) ?? (page === 1 ? matchRoute('GET', request.path, request.query) : undefined);
+        const route =
+          matchRoute('GET', request.path, pageQuery) ??
+          (page === 1 ? matchRoute('GET', request.path, request.query) : undefined);
         if (!route) {
           break;
         }
