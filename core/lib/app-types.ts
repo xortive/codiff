@@ -1,4 +1,4 @@
-import type { CodeViewHandle } from '@pierre/diffs/react';
+import type { CodeViewHandle, SelectedLineRange } from '@pierre/diffs/react';
 import type { ReactNode } from 'react';
 import type {
   ChangedFile,
@@ -10,6 +10,7 @@ import type {
   ReviewCommentPosition,
   SubmittedReviewComment as PersistedSubmittedReviewComment,
   ReviewSource,
+  WalkthroughRegion,
 } from '../types.ts';
 
 export type WalkthroughError = Extract<NarrativeWalkthroughResult, { status: 'unavailable' }>;
@@ -22,6 +23,13 @@ export type ReviewCommentAnnotationMetadata = {
 export type CodeQualityAnnotationMetadata = {
   finding: PullRequestCodeQualityFinding;
   type: 'code-quality';
+};
+
+export type WalkthroughRegionAnnotationMetadata = {
+  active: boolean;
+  isPrimary: boolean;
+  region: WalkthroughRegion;
+  type: 'walkthrough-region';
 };
 
 type MarkdownPreviewAnnotationMetadata = {
@@ -50,6 +58,7 @@ export type ReviewAnnotationMetadata =
   | ImagePreviewAnnotationMetadata
   | MarkdownPreviewAnnotationMetadata
   | ReviewCommentAnnotationMetadata
+  | WalkthroughRegionAnnotationMetadata
   | WalkthroughHeaderAnnotationMetadata;
 
 export type CodeViewInstance = NonNullable<
@@ -76,6 +85,7 @@ export type ReviewScrollTarget = {
   blockId?: string;
   commentId?: string;
   path?: string;
+  range?: SelectedLineRange;
   request: number;
 };
 
@@ -202,6 +212,7 @@ export type RepositoryLoadError = {
 };
 
 export type CodeViewItemMetadata = {
+  activeWalkthroughRegionId?: string;
   blockId: string;
   canEditMarkdown: boolean;
   canRenderMarkdown: boolean;
@@ -216,4 +227,5 @@ export type CodeViewItemMetadata = {
   section: DiffSection;
   sectionCount: number;
   walkthroughNote?: WalkthroughNote;
+  walkthroughRegions?: ReadonlyArray<WalkthroughRegion>;
 };

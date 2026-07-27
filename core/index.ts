@@ -5,6 +5,7 @@ export {
   parseNarrativeWalkthroughV4,
   parseWalkthroughArtifactV5,
   parseWalkthroughModel,
+  resolveWalkthroughFiles,
   safeParseNarrativeWalkthroughV4,
   walkthroughArtifactV5Schema,
   walkthroughModelFromV4,
@@ -125,6 +126,7 @@ export type {
   WalkthroughNarrativeV5,
   WalkthroughProgressEvent,
   WalkthroughProgressPhase,
+  WalkthroughRegion,
 } from './types.ts';
 export type {
   LocalReviewNote,

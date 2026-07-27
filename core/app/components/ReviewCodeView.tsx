@@ -60,6 +60,7 @@ import type {
   ReviewScrollBehavior,
   ReviewScrollTarget,
   WalkthroughNote,
+  WalkthroughRegionAnnotationMetadata,
 } from '../../lib/app-types.ts';
 import {
   codeViewItemMetrics,
@@ -91,7 +92,7 @@ import {
 } from '../../lib/identifier-navigation.ts';
 import { getItemVersion } from '../../lib/item-version.ts';
 import { isNativeInputTarget, isPrimaryModifier } from '../../lib/keyboard.ts';
-import { sanitizeMarkdownImages } from '../../lib/markdown.tsx';
+import { renderInlineMarkdown, sanitizeMarkdownImages } from '../../lib/markdown.tsx';
 import { isGeneratedWalkthroughFile } from '../../lib/narrative-walkthrough-diff.js';
 import {
   getCommentKey,
@@ -122,6 +123,7 @@ import {
   type SourceDescriptionAuthor,
 } from '../../lib/source-description.ts';
 import { getSourceKey } from '../../lib/source.ts';
+import { applyWalkthroughRegionHighlights } from '../../lib/walkthrough-region-highlights.ts';
 import type {
   ChangedFile,
   CodiffPreferences,
@@ -137,6 +139,7 @@ import type {
   PullRequestExistingReviewComment,
   ResolvedReviewSource,
   ReviewSource,
+  WalkthroughRegion,
 } from '../../types.ts';
 import { Avatar } from './Avatar.tsx';
 import { Button } from './Button.tsx';
@@ -2371,6 +2374,24 @@ function CodeQualityAnnotation({
   );
 }
 
+function WalkthroughRegionAnnotation({
+  annotation,
+}: {
+  annotation: DiffLineAnnotation<WalkthroughRegionAnnotationMetadata>;
+}) {
+  const { isPrimary, region } = annotation.metadata;
+  return (
+    <div
+      className="walkthrough-region-annotation"
+      data-walkthrough-region-id={region.id}
+      id={isPrimary ? region.id : undefined}
+    >
+      <strong>{region.title}</strong>
+      <span>{renderInlineMarkdown(region.tooltip)}</span>
+    </div>
+  );
+}
+
 const scrollTargetRetryFrameLimit = 90;
 
 const getEffectiveScrollBehavior = (behavior: ReviewScrollBehavior) =>
@@ -2397,6 +2418,7 @@ type NavAnchor = {
 };
 
 type FileReviewDiffBlock = {
+  activeRegionId?: string;
   comments?: ReadonlyArray<ReviewComment>;
   file: ChangedFile;
   fileSelected?: boolean;
@@ -2405,6 +2427,7 @@ type FileReviewDiffBlock = {
   id: string;
   itemIdPrefix?: string;
   note?: string;
+  regions?: ReadonlyArray<WalkthroughRegion>;
   reviewIdentity?: ReviewIdentity;
   selected?: boolean;
 };
@@ -2473,6 +2496,15 @@ const lineIsVisibleInFileDiff = (
     const hunkLineCount = side === 'deletions' ? hunk.deletionCount : hunk.additionCount;
     return lineNumber >= hunkStart && lineNumber < hunkStart + hunkLineCount;
   });
+
+const lastVisibleRegionLine = (fileDiff: FileDiffMetadata, region: WalkthroughRegion) => {
+  for (let line = region.endLine; line >= region.startLine; line -= 1) {
+    if (lineIsVisibleInFileDiff(fileDiff, region.side, line)) {
+      return line;
+    }
+  }
+  return null;
+};
 
 const reviewCommentAnchorIsVisibleInFileDiff = (
   comment: ReviewComment,
@@ -3021,6 +3053,7 @@ export function ReviewCodeView({
     const nextItemMetadata = new Map<string, CodeViewItemMetadata>();
     const nextSearchTargetsByBaseItemId = new Map<string, Array<RenderedSearchTarget>>();
     const nextSelectedHeaderItemIds = new Set<string>();
+    const annotatedRegionIds = new Set<string>();
     const fontLayoutKey = `line-height:${diffLineHeight}`;
 
     for (const block of reviewBlocks) {
@@ -3171,8 +3204,32 @@ export function ReviewCodeView({
                 side: 'additions',
               }) satisfies DiffLineAnnotation<ReviewAnnotationMetadata>,
           );
+        const visibleRegions = (block.regions ?? []).filter(
+          (region) => lastVisibleRegionLine(fileDiff, region) != null,
+        );
+        const regionAnnotations = visibleRegions.flatMap((region) => {
+          const lineNumber = lastVisibleRegionLine(fileDiff, region);
+          if (lineNumber == null) {
+            return [];
+          }
+          const isPrimary = !annotatedRegionIds.has(region.id);
+          annotatedRegionIds.add(region.id);
+          return [
+            {
+              lineNumber,
+              metadata: {
+                active: region.id === block.activeRegionId,
+                isPrimary,
+                region,
+                type: 'walkthrough-region',
+              },
+              side: region.side,
+            } satisfies DiffLineAnnotation<ReviewAnnotationMetadata>,
+          ];
+        });
 
         nextItemMetadata.set(id, {
+          ...(block.activeRegionId ? { activeWalkthroughRegionId: block.activeRegionId } : {}),
           blockId: block.id,
           canEditMarkdown,
           canRenderMarkdown,
@@ -3187,6 +3244,7 @@ export function ReviewCodeView({
           section,
           sectionCount: file.sections.length,
           walkthroughNote,
+          ...(visibleRegions.length > 0 ? { walkthroughRegions: visibleRegions } : {}),
         });
         nextFirstItemByBlockId.set(block.id, nextFirstItemByBlockId.get(block.id) ?? id);
         nextFirstItemByPath.set(file.path, nextFirstItemByPath.get(file.path) ?? id);
@@ -3259,7 +3317,7 @@ export function ReviewCodeView({
           continue;
         }
         nextItems.push({
-          annotations: [...annotationMap.values(), ...codeQualityAnnotations],
+          annotations: [...annotationMap.values(), ...codeQualityAnnotations, ...regionAnnotations],
           collapsed: isCollapsed,
           fileDiff,
           id,
@@ -3273,6 +3331,8 @@ export function ReviewCodeView({
                   ? `${metadata.finding.fingerprint}:${metadata.finding.status}`
                   : '',
               )
+              .join(',')}:${visibleRegions
+              .map((region) => `${region.id}:${region.side}:${region.startLine}-${region.endLine}`)
               .join(',')}`,
           ),
         });
@@ -3866,6 +3926,22 @@ export function ReviewCodeView({
         },
         onPostRender: (node, instance, phase, context) => {
           const metadata = itemMetadata.get(context.item.id);
+          const regionRoot = node.shadowRoot;
+          if (regionRoot) {
+            applyWalkthroughRegionHighlights(
+              regionRoot,
+              metadata?.walkthroughRegions ?? [],
+              metadata?.activeWalkthroughRegionId,
+            );
+          }
+          for (const annotation of node.querySelectorAll<HTMLElement>(
+            '[data-walkthrough-region-id]',
+          )) {
+            annotation.classList.toggle(
+              'active',
+              annotation.dataset.walkthroughRegionId === metadata?.activeWalkthroughRegionId,
+            );
+          }
           const isWalkthroughHeaderItem = context.item.id.endsWith(':walkthrough-header');
           node.classList.toggle('codiff-walkthrough-header-item', isWalkthroughHeaderItem);
           node.classList.toggle(
@@ -4154,6 +4230,21 @@ export function ReviewCodeView({
 
     const tryScroll = () => {
       if (canceled || handledScrollRequestRef.current === scrollTarget.request) {
+        return;
+      }
+
+      const handle = codeViewRef.current;
+      const viewer = handle?.getInstance();
+      if (scrollTarget.range && handle && viewer?.getTopForItem(itemId) != null) {
+        handle.scrollTo({
+          align: 'center',
+          behavior: getEffectiveScrollBehavior(behavior),
+          id: itemId,
+          offset: DEFAULT_PADDING,
+          range: scrollTarget.range,
+          type: 'range',
+        });
+        handledScrollRequestRef.current = scrollTarget.request;
         return;
       }
 
@@ -4716,6 +4807,14 @@ export function ReviewCodeView({
         return (
           <CodeQualityAnnotation
             annotation={annotation as DiffLineAnnotation<CodeQualityAnnotationMetadata>}
+          />
+        );
+      }
+
+      if (annotation.metadata.type === 'walkthrough-region') {
+        return (
+          <WalkthroughRegionAnnotation
+            annotation={annotation as DiffLineAnnotation<WalkthroughRegionAnnotationMetadata>}
           />
         );
       }

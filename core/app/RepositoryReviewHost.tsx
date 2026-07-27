@@ -638,6 +638,7 @@ export function RepositoryReviewHost({
     mainModeRef,
     narrativeNavigation,
     narrativeWalkthrough,
+    narrativeWalkthroughFiles,
     narrativeWalkthroughRef,
     openCommitView,
     persistedNarrativeWalkthroughRef,
