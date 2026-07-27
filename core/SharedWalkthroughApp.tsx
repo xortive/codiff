@@ -95,7 +95,10 @@ import {
 import { abbreviateHomePath, sortFiles } from './lib/files.ts';
 import { isNativeInputTarget } from './lib/keyboard.ts';
 import { isGeneratedWalkthroughFile } from './lib/narrative-walkthrough-diff.js';
-import { parseWalkthroughModel } from './lib/narrative-walkthrough-schema.ts';
+import {
+  parseWalkthroughModel,
+  resolveWalkthroughFiles,
+} from './lib/narrative-walkthrough-schema.ts';
 import {
   resolveProviderCommentTarget,
   resolveShareCommentTarget,
@@ -553,9 +556,10 @@ export function ReviewSurface({
           },
     [snapshot.walkthrough, walkthrough?.commit],
   );
+  const walkthroughFiles = resolveWalkthroughFiles(sharedWalkthrough, snapshot.files);
   const navigation = useNarrativeNavigation(
     sharedWalkthrough,
-    snapshot.files,
+    walkthroughFiles,
     `${snapshot.repository.root}:${getSourceKey(snapshot.repository.source)}`,
   );
   const defaultKeymap = useMemo(() => createDefaultConfig().keymap, []);
@@ -2151,7 +2155,7 @@ export function ReviewSurface({
           ) : walkthroughReady ? (
             <NarrativeWalkthroughView
               allowCommit={walkthrough?.commit != null}
-              files={snapshot.files}
+              files={walkthroughFiles}
               navigation={navigation}
               onActiveReviewTargetChange={desktop?.onActiveWalkthroughReviewTargetChange ?? noop}
               onCommit={walkthrough?.commit ?? disabledCommit}
