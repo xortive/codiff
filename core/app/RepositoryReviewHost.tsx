@@ -610,6 +610,7 @@ export function RepositoryReviewHost({
     narrativeWalkthrough,
     narrativeWalkthroughRef,
     openCommitView,
+    persistedNarrativeWalkthroughRef,
     plainCommitModel,
     refreshWalkthroughForState,
     setMainMode,
@@ -1074,7 +1075,7 @@ export function RepositoryReviewHost({
     sourceSessionsRef.current.set(getSourceRevisionKey(currentState.source), {
       collapsed: new Set(collapsedRef.current),
       expandedGenerated: new Set(expandedGeneratedRef.current),
-      narrativeWalkthrough: narrativeWalkthroughRef.current,
+      narrativeWalkthrough: persistedNarrativeWalkthroughRef.current,
       reviewComments: reviewCommentsRef.current,
       selectedPath: selectedPathRef.current,
       viewed: viewedRef.current,
@@ -1085,7 +1086,7 @@ export function RepositoryReviewHost({
         status,
       })),
     });
-  }, [narrativeWalkthroughRef, reviewCommentsRef, walkthroughErrorRef]);
+  }, [persistedNarrativeWalkthroughRef, reviewCommentsRef, walkthroughErrorRef]);
 
   useEffect(
     () =>
@@ -1775,7 +1776,8 @@ export function RepositoryReviewHost({
       state: snapshotState,
       title,
       walkthrough:
-        narrativeWalkthrough ?? createPlaceholderWalkthrough(state, title, walkthroughAgent),
+        persistedNarrativeWalkthroughRef.current ??
+        createPlaceholderWalkthrough(state, title, walkthroughAgent),
     }),
     ...(source.type === 'pull-request'
       ? {
