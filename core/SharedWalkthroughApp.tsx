@@ -95,6 +95,7 @@ import {
 import { abbreviateHomePath, sortFiles } from './lib/files.ts';
 import { isNativeInputTarget } from './lib/keyboard.ts';
 import { isGeneratedWalkthroughFile } from './lib/narrative-walkthrough-diff.js';
+import { walkthroughModelFromV4 } from './lib/narrative-walkthrough-schema.ts';
 import {
   resolveProviderCommentTarget,
   resolveShareCommentTarget,
@@ -544,9 +545,9 @@ export function ReviewSurface({
   const sharedWalkthrough = useMemo(
     () =>
       walkthrough?.commit
-        ? snapshot.walkthrough
+        ? walkthroughModelFromV4(snapshot.walkthrough)
         : {
-            ...snapshot.walkthrough,
+            ...walkthroughModelFromV4(snapshot.walkthrough),
             commit: undefined,
           },
     [snapshot.walkthrough, walkthrough?.commit],
