@@ -326,13 +326,7 @@ const createWalkthroughBlocks = (
       firstBlockIdByStop[stop.index] = blockId;
       stopIndexByBlockId.set(blockId, stop.index);
       blocks.push({
-        header: (
-          <StopHeader
-            codeIssues={codeIssues}
-            onRegionLink={routeRegionLink}
-            stop={stop}
-          />
-        ),
+        header: <StopHeader codeIssues={codeIssues} onRegionLink={routeRegionLink} stop={stop} />,
         headerSelected: stop.index === currentIndex,
         id: blockId,
       });
@@ -372,11 +366,7 @@ const createWalkthroughBlocks = (
         file,
         header:
           runIndex === 0 ? (
-            <StopHeader
-              codeIssues={codeIssues}
-              onRegionLink={routeRegionLink}
-              stop={stop}
-            />
+            <StopHeader codeIssues={codeIssues} onRegionLink={routeRegionLink} stop={stop} />
           ) : null,
         headerSelected: stop.index === currentIndex,
         id: blockId,

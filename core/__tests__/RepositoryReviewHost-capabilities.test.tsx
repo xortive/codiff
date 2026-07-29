@@ -139,6 +139,7 @@ const installWindowApi = (overrides: Record<string, unknown> = {}) => {
       findInDiffs = callback;
       return unsubscribe;
     }),
+    onNarrativeWalkthroughUpdated: vi.fn(() => unsubscribe),
     onOpenReviewSource: vi.fn(() => unsubscribe),
     onRefreshRequest: vi.fn((callback: () => void) => {
       refreshRequest = callback;

@@ -42,6 +42,7 @@ type UseAppWalkthroughOptions = {
 };
 
 const emptyFiles: ReadonlyArray<ChangedFile> = [];
+const emptyPendingAssessmentThreadIds: ReadonlySet<string> = new Set();
 
 export function useAppWalkthrough({
   initialMainMode = 'review',
@@ -60,6 +61,8 @@ export function useAppWalkthrough({
   const [narrativeWalkthrough, setNarrativeWalkthrough] = useState<WalkthroughModel | null>(() =>
     initialPersistedWalkthrough ? parseWalkthroughModel(initialPersistedWalkthrough) : null,
   );
+  const [persistedNarrativeWalkthrough, setPersistedNarrativeWalkthroughState] =
+    useState<PersistedWalkthrough | null>(initialPersistedWalkthrough);
   const [shareWalkthroughEnabled, setShareWalkthroughEnabled] = useState(false);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>(initialSidebarMode);
   const [walkthroughError, setWalkthroughError] = useState<WalkthroughError | null>(() =>
@@ -77,7 +80,20 @@ export function useAppWalkthrough({
   }>({ generation: null, phase: null, responseLabelIndex: -1, stageRevision: 0 });
   const [walkthroughSharing, setWalkthroughSharing] = useState(false);
   const [walkthroughUnread, setWalkthroughUnread] = useState(false);
+  const [pendingAssessmentThreadIds, setPendingAssessmentThreadIds] = useState<ReadonlySet<string>>(
+    () =>
+      new Set(
+        initialWalkthroughResult?.status === 'ready'
+          ? (initialWalkthroughResult.pendingAssessmentThreadIds ?? [])
+          : [],
+      ),
+  );
   const activeReviewCommandTargetRef = useRef<ReviewCommandTarget | null>(null);
+  const activeWalkthroughCacheKeyRef = useRef<string | null>(
+    initialWalkthroughResult?.status === 'ready'
+      ? (initialWalkthroughResult.cacheKey ?? null)
+      : null,
+  );
   const mainModeRef = useRef<ReloadMainMode>(initialMainMode);
   const narrativeWalkthroughRef = useRef<WalkthroughModel | null>(narrativeWalkthrough);
   const persistedNarrativeWalkthroughRef = useRef<PersistedWalkthrough | null>(
@@ -151,7 +167,12 @@ export function useAppWalkthrough({
       }
       setWalkthroughLoading(false);
       if (initialWalkthroughResult.status === 'ready') {
+        activeWalkthroughCacheKeyRef.current = initialWalkthroughResult.cacheKey ?? null;
+        setPendingAssessmentThreadIds(
+          new Set(initialWalkthroughResult.pendingAssessmentThreadIds ?? []),
+        );
         persistedNarrativeWalkthroughRef.current = initialWalkthroughResult.walkthrough;
+        setPersistedNarrativeWalkthroughState(initialWalkthroughResult.walkthrough);
         setNarrativeWalkthrough(parseWalkthroughModel(initialWalkthroughResult.walkthrough));
         setWalkthroughError(null);
       } else {
@@ -170,6 +191,8 @@ export function useAppWalkthrough({
 
   useEffect(() => {
     activeReviewCommandTargetRef.current = null;
+    activeWalkthroughCacheKeyRef.current = null;
+    queueMicrotask(() => setPendingAssessmentThreadIds(emptyPendingAssessmentThreadIds));
   }, [navigationResetKey]);
 
   useEffect(
@@ -192,8 +215,26 @@ export function useAppWalkthrough({
     [],
   );
 
+  useEffect(() => {
+    const subscribe = window.codiff.onNarrativeWalkthroughUpdated;
+    if (!subscribe) {
+      return;
+    }
+    return subscribe(({ cacheKey, pendingAssessmentThreadIds: pendingIds, walkthrough }) => {
+      if (activeWalkthroughCacheKeyRef.current !== cacheKey) {
+        return;
+      }
+      persistedNarrativeWalkthroughRef.current = walkthrough;
+      setPersistedNarrativeWalkthroughState(walkthrough);
+      setNarrativeWalkthrough(parseWalkthroughModel(walkthrough));
+      setPendingAssessmentThreadIds(new Set(pendingIds));
+    });
+  }, []);
+
   const startWalkthroughLoading = useCallback(() => {
     walkthroughProgressEnabledRef.current = true;
+    activeWalkthroughCacheKeyRef.current = null;
+    setPendingAssessmentThreadIds(emptyPendingAssessmentThreadIds);
     setWalkthroughProgress((current) => ({
       generation: null,
       phase: null,
@@ -237,6 +278,17 @@ export function useAppWalkthrough({
     [stateRef],
   );
 
+  const applyNarrativeWalkthroughResult = useCallback(
+    (result: Extract<NarrativeWalkthroughResult, { status: 'ready' }>) => {
+      activeWalkthroughCacheKeyRef.current = result.cacheKey ?? null;
+      setPendingAssessmentThreadIds(new Set(result.pendingAssessmentThreadIds ?? []));
+      persistedNarrativeWalkthroughRef.current = result.walkthrough;
+      setPersistedNarrativeWalkthroughState(result.walkthrough);
+      setNarrativeWalkthrough(parseWalkthroughModel(result.walkthrough));
+    },
+    [],
+  );
+
   const loadNarrativeWalkthrough = useCallback(
     (source: RepositoryState['source'], options?: NarrativeWalkthroughRequestOptions) => {
       const request = walkthroughRequestRef.current + 1;
@@ -249,6 +301,8 @@ export function useAppWalkthrough({
         getSourceRevisionKey(stateRef.current?.source ?? source) === sourceKey;
       startWalkthroughLoading();
       setWalkthroughError(null);
+      activeWalkthroughCacheKeyRef.current = null;
+      setPendingAssessmentThreadIds(emptyPendingAssessmentThreadIds);
       return window.codiff
         .getNarrativeWalkthrough(source, options)
         .then((result) => {
@@ -257,8 +311,7 @@ export function useAppWalkthrough({
           }
 
           if (result.status === 'ready') {
-            persistedNarrativeWalkthroughRef.current = result.walkthrough;
-            setNarrativeWalkthrough(parseWalkthroughModel(result.walkthrough));
+            applyNarrativeWalkthroughResult(result);
             if (sidebarModeRef.current === 'walkthrough') {
               setWalkthroughUnread(false);
             } else {
@@ -287,7 +340,13 @@ export function useAppWalkthrough({
           }
         });
     },
-    [setWalkthroughLoading, startWalkthroughLoading, stateGenerationRef, stateRef],
+    [
+      applyNarrativeWalkthroughResult,
+      setWalkthroughLoading,
+      startWalkthroughLoading,
+      stateGenerationRef,
+      stateRef,
+    ],
   );
 
   const refreshWalkthroughForState = useCallback(
@@ -305,6 +364,9 @@ export function useAppWalkthrough({
 
       walkthroughRequestRef.current += 1;
       persistedNarrativeWalkthroughRef.current = null;
+      setPersistedNarrativeWalkthroughState(null);
+      activeWalkthroughCacheKeyRef.current = null;
+      setPendingAssessmentThreadIds(emptyPendingAssessmentThreadIds);
       setNarrativeWalkthrough(null);
       setWalkthroughError(null);
       setWalkthroughLoading(false);
@@ -340,6 +402,7 @@ export function useAppWalkthrough({
       }
       if (state.files.length === 0) {
         persistedNarrativeWalkthroughRef.current = null;
+        setPersistedNarrativeWalkthroughState(null);
         setNarrativeWalkthrough(null);
         setWalkthroughError(null);
         setWalkthroughLoading(false);
@@ -450,7 +513,12 @@ export function useAppWalkthrough({
     mainMode === 'commit' && state?.source.type === 'working-tree' && state.files.length > 0;
   const setPersistedNarrativeWalkthrough = useCallback(
     (walkthrough: PersistedWalkthrough | null) => {
+      if (!walkthrough) {
+        activeWalkthroughCacheKeyRef.current = null;
+        setPendingAssessmentThreadIds(emptyPendingAssessmentThreadIds);
+      }
       persistedNarrativeWalkthroughRef.current = walkthrough;
+      setPersistedNarrativeWalkthroughState(walkthrough);
       setNarrativeWalkthrough(walkthrough ? parseWalkthroughModel(walkthrough) : null);
     },
     [],
@@ -458,6 +526,7 @@ export function useAppWalkthrough({
 
   return {
     activeReviewCommandTargetRef,
+    applyNarrativeWalkthroughResult,
     cancelWalkthroughRequest,
     changeSidebarMode,
     closeCommitView,
@@ -470,6 +539,8 @@ export function useAppWalkthrough({
     narrativeWalkthroughFiles,
     narrativeWalkthroughRef,
     openCommitView,
+    pendingAssessmentThreadIds,
+    persistedNarrativeWalkthrough,
     persistedNarrativeWalkthroughRef,
     plainCommitModel,
     refreshWalkthroughForState,
