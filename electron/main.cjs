@@ -44,6 +44,7 @@ const { attachExternalLinkHandling } = require('./external-links.cjs');
 const { normalizeOpenAIModel } = require('./codex.cjs');
 const { normalizeClaudeModel } = require('./claude.cjs');
 const { normalizeOpenCodeModel, renderOpenCodeCommand } = require('./opencode.cjs');
+const { parseJSONMessage } = require('./agent-shared.cjs');
 const { createWalkthroughCommit } = require('./walkthrough-commit.cjs');
 const { readKeyboardLayout, watchKeyboardLayout } = require('./keyboard-layout.cjs');
 const { diagnoseWalkthroughMismatch } = require('./walkthrough-diagnosis.cjs');
@@ -116,8 +117,15 @@ const {
   invokeWalkthroughModel,
   parseStructuredModelResponse,
 } = require('./walkthrough-model-invocation.cjs');
-const { readStoredWalkthrough, writeStoredWalkthrough } = require('./walkthrough-store.cjs');
-const { parsePersistedWalkthrough } = require('./walkthrough-authoring-bridge.cjs');
+const {
+  readStoredWalkthrough,
+  replaceStoredAssessment,
+  writeStoredWalkthrough,
+} = require('./walkthrough-store.cjs');
+const { buildWalkthroughAssessmentPlan } = require('./walkthrough-assessment-plan.cjs');
+const { createWalkthroughAssessmentScheduler } = require('./walkthrough-assessment-scheduler.cjs');
+const { loadAuthoring, parsePersistedWalkthrough } = require('./walkthrough-authoring-bridge.cjs');
+const { walkthroughAssessmentResponseSchema } = require('./narrative-walkthrough-schema.cjs');
 const { uploadSharedSnapshot } = require('./shared-walkthrough-upload.cjs');
 const {
   resolvePlanShareTarget,
@@ -167,6 +175,9 @@ const windowInitialRepositoryStates = new Map();
 /** @type {Map<number, number>} */
 const walkthroughProgressGenerations = new Map();
 const walkthroughGenerationCoordinator = createWalkthroughGenerationCoordinator();
+const walkthroughAssessmentScheduler = createWalkthroughAssessmentScheduler({
+  replace: replaceStoredAssessment,
+});
 /** @type {Map<number, string>} */
 const planInitialVersions = new Map();
 /** @type {Set<number>} */
@@ -1729,6 +1740,15 @@ ipcMain.handle('codiff:cancelNarrativeWalkthrough', (event) => {
   walkthroughGenerationCoordinator.cancel(event.sender.id, new Error('The review source changed.'));
 });
 
+/** @param {import('../core/types.ts').NarrativeWalkthroughUpdate} update */
+const broadcastNarrativeWalkthroughUpdate = (update) => {
+  for (const window of openWindows) {
+    if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+      window.webContents.send('codiff:narrativeWalkthroughUpdated', update);
+    }
+  }
+};
+
 ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) => {
   const launchOptions = windowLaunchOptions.get(event.sender.id);
   const abortController = walkthroughGenerationCoordinator.begin(event.sender.id);
@@ -1843,6 +1863,8 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
       request: cacheRequest,
       state,
     });
+    let artifact = null;
+    let activeCacheKey = cacheKey;
     if (!options?.force) {
       const storedWalkthrough = readStoredWalkthrough(cacheKey);
       let cachedWalkthrough = null;
@@ -1861,103 +1883,105 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
           total: 1,
           units: [{ id: 'narrative', label: 'Walkthrough narrative', status: 'ready' }],
         });
-        const walkthrough =
-          cachedWalkthrough.version === 5
-            ? walkthroughContext
-              ? {
-                  ...cachedWalkthrough,
-                  narrative: {
-                    ...cachedWalkthrough.narrative,
-                    context: walkthroughContext,
-                  },
-                }
-              : cachedWalkthrough
-            : {
-                ...cachedWalkthrough,
-                ...(walkthroughContext ? { context: walkthroughContext } : {}),
-                agent: agent.id,
-                repo: { branch: state.branch, root: state.root },
-                source: state.source,
-              };
-        return {
-          status: 'ready',
-          walkthrough,
-        };
+        if (cachedWalkthrough.version !== 5) {
+          return {
+            status: 'ready',
+            walkthrough: {
+              ...cachedWalkthrough,
+              ...(walkthroughContext ? { context: walkthroughContext } : {}),
+              agent: agent.id,
+              repo: { branch: state.branch, root: state.root },
+              source: state.source,
+            },
+          };
+        }
+        artifact = cachedWalkthrough;
       }
     }
 
-    const generationRequest = createNarrativeWalkthroughGenerationRequest(
-      state,
-      agent,
-      walkthroughContext,
-      walkthroughPrompt,
-      options?.previousWalkthrough,
-    );
-    let notFoundCode;
-    const result = await runWalkthroughGenerationTasks({
-      onProgress: reportProgress,
-      reusableComponents: walkthroughGenerationCoordinator.getReusable(
-        event.sender.id,
-        cacheKey,
-        options?.force,
-      ),
-      signal: abortController.signal,
-      tasks: [
-        {
-          id: 'narrative',
-          identity: cacheKey,
-          label: 'Walkthrough narrative',
-          profile,
-          run: async ({ profile: taskProfile, semanticInput, signal }) => {
-            try {
-              reportProgress('agent-generation');
-              const invocation = await invokeWalkthroughModel({
-                agent,
-                agentOptions: { ...agentOptions, onProgress: reportProgress },
-                outputName: generationRequest.outputName,
-                profile: taskProfile,
-                prompt: semanticInput.prompt,
-                repoRoot: state.root,
-                schema: generationRequest.schema,
-                signal,
-                timeoutMessage: generationRequest.timeoutMessage,
-                timeoutMs: generationRequest.timeoutMs,
-              });
-              reportProgress('response-received');
-              const walkthrough = normalizeNarrativeWalkthrough(
-                parseStructuredModelResponse(invocation.response),
-                state.files,
-                {
-                  agent: agent.id,
-                  branch: state.branch,
-                  generatedAt: invocation.generationMetadata.generatedAt,
-                  root: state.root,
-                  source: state.source,
-                },
-                generationRequest.hunkIdByAlias,
-              );
-              if (walkthroughContext && !walkthrough.context) {
-                walkthrough.context = walkthroughContext;
+    let generatedModel = walkthroughModel;
+    if (!artifact) {
+      const generationRequest = createNarrativeWalkthroughGenerationRequest(
+        state,
+        agent,
+        walkthroughContext,
+        walkthroughPrompt,
+        options?.previousWalkthrough,
+      );
+      let notFoundCode;
+      const result = await runWalkthroughGenerationTasks({
+        onProgress: reportProgress,
+        reusableComponents: walkthroughGenerationCoordinator.getReusable(
+          event.sender.id,
+          cacheKey,
+          options?.force,
+        ),
+        signal: abortController.signal,
+        tasks: [
+          {
+            id: 'narrative',
+            identity: cacheKey,
+            label: 'Walkthrough narrative',
+            profile,
+            run: async ({ profile: taskProfile, semanticInput, signal }) => {
+              try {
+                reportProgress('agent-generation');
+                const invocation = await invokeWalkthroughModel({
+                  agent,
+                  agentOptions: { ...agentOptions, onProgress: reportProgress },
+                  outputName: generationRequest.outputName,
+                  profile: taskProfile,
+                  prompt: semanticInput.prompt,
+                  repoRoot: state.root,
+                  schema: generationRequest.schema,
+                  signal,
+                  timeoutMessage: generationRequest.timeoutMessage,
+                  timeoutMs: generationRequest.timeoutMs,
+                });
+                reportProgress('response-received');
+                const walkthrough = normalizeNarrativeWalkthrough(
+                  parseStructuredModelResponse(invocation.response),
+                  state.files,
+                  {
+                    agent: agent.id,
+                    branch: state.branch,
+                    generatedAt: invocation.generationMetadata.generatedAt,
+                    root: state.root,
+                    source: state.source,
+                  },
+                  generationRequest.hunkIdByAlias,
+                );
+                if (walkthroughContext && !walkthrough.context) {
+                  walkthrough.context = walkthroughContext;
+                }
+                if (invocation.generationMetadata?.model) {
+                  generatedModel = invocation.generationMetadata.model;
+                }
+                return { generationMetadata: invocation.generationMetadata, output: walkthrough };
+              } catch (error) {
+                if (agent.isNotFoundError(error)) {
+                  notFoundCode = agent.notFoundCode;
+                }
+                throw error;
               }
-              return { generationMetadata: invocation.generationMetadata, output: walkthrough };
-            } catch (error) {
-              if (agent.isNotFoundError(error)) {
-                notFoundCode = agent.notFoundCode;
-              }
-              throw error;
-            }
+            },
+            semanticInput: { prompt: generationRequest.prompt },
           },
-          semanticInput: { prompt: generationRequest.prompt },
-        },
-      ],
-    });
-    walkthroughGenerationCoordinator.retain(
-      event.sender.id,
-      abortController,
-      cacheKey,
-      result.components,
-    );
-    if (result.status === 'ready') {
+        ],
+      });
+      walkthroughGenerationCoordinator.retain(
+        event.sender.id,
+        abortController,
+        cacheKey,
+        result.components,
+      );
+      if (result.status !== 'ready') {
+        return {
+          ...(notFoundCode ? { code: notFoundCode } : {}),
+          reason: result.reason,
+          status: 'unavailable',
+        };
+      }
       const walkthrough = result.components.find(
         (component) => component.identity === cacheKey,
       )?.output;
@@ -1965,22 +1989,114 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
         throw new Error('Walkthrough generation completed without a validated narrative.');
       }
       abortController.signal.throwIfAborted();
-      try {
-        const cacheableWalkthrough = {
-          ...walkthrough,
-          narrative: { ...walkthrough.narrative },
-        };
-        delete cacheableWalkthrough.narrative.context;
-        writeStoredWalkthrough(cacheKey, cacheableWalkthrough);
-      } catch {
-        // Caching is optional; a filesystem failure must not hide a generated result.
+      artifact = {
+        ...walkthrough,
+        narrative: { ...walkthrough.narrative },
+      };
+      delete artifact.narrative.context;
+    }
+
+    const authoring = await loadAuthoring();
+    const assessmentModels = [
+      generatedModel,
+      ...(agent.fallbackModel && agent.fallbackModel !== generatedModel
+        ? [agent.fallbackModel]
+        : []),
+    ];
+    const assessmentProfile = authoring.createAssessmentGenerationProfile({
+      agent: agent.id,
+      modelCandidates: assessmentModels,
+      settings: { scope: 'single-diff-assessment' },
+    });
+    const assessmentPlan = buildWalkthroughAssessmentPlan({
+      artifact,
+      authoring,
+      comments: state.reviewComments ?? [],
+      profile: assessmentProfile,
+    });
+    let assessmentStorageReady = readStoredWalkthrough(activeCacheKey)?.version === 5;
+    try {
+      if (!authoring.assessmentValuesEqual(artifact, assessmentPlan.artifact)) {
+        writeStoredWalkthrough(activeCacheKey, assessmentPlan.artifact);
+      } else if (!assessmentStorageReady) {
+        writeStoredWalkthrough(activeCacheKey, artifact);
       }
-      return { status: 'ready', walkthrough };
+      assessmentStorageReady = true;
+    } catch {
+      // Caching is optional; narrative publication remains successful.
+    }
+
+    const pendingAssessmentThreadIds = new Set(
+      assessmentStorageReady
+        ? assessmentPlan.tasks.map((task) => task.demand.identity.threadId)
+        : [],
+    );
+    for (const task of assessmentStorageReady ? assessmentPlan.tasks : []) {
+      void walkthroughAssessmentScheduler.schedule({
+        cacheKey: activeCacheKey,
+        demand: task.demand,
+        expectedComponent: task.expectedComponent,
+        generate: () =>
+          authoring.generateAssessmentComponent({
+            capturedContext: assessmentPlan.artifact.capturedContext,
+            demand: task.demand,
+            profile: assessmentProfile,
+            runModel: async ({ profile, prompt }) => {
+              const assessmentOptions = getAgentOptions(agent);
+              let assessmentModel = profile.modelCandidates[0] ?? generatedModel;
+              const onAssessmentModelFallback = assessmentOptions.onModelFallback;
+              const response = await agent.run(
+                state.root,
+                prompt,
+                walkthroughAssessmentResponseSchema,
+                'walkthrough-assessment.json',
+                `${agent.label} assessment timed out.`,
+                {
+                  ...assessmentOptions,
+                  model: assessmentModel,
+                  onModelFallback: async (fallbackModel, originalModel) => {
+                    assessmentModel = fallbackModel;
+                    await onAssessmentModelFallback(fallbackModel, originalModel);
+                  },
+                  timeoutMs: agent.defaultTimeoutMs,
+                },
+              );
+              return {
+                generationMetadata: {
+                  agent: agent.id,
+                  generatedAt: new Date().toISOString(),
+                  model: assessmentModel,
+                  profile,
+                },
+                response: parseJSONMessage(response),
+              };
+            },
+          }),
+        onUpdate: (walkthrough) => {
+          pendingAssessmentThreadIds.delete(task.demand.identity.threadId);
+          broadcastNarrativeWalkthroughUpdate({
+            cacheKey: activeCacheKey,
+            pendingAssessmentThreadIds: [...pendingAssessmentThreadIds],
+            walkthrough: walkthroughContext
+              ? {
+                  ...walkthrough,
+                  narrative: { ...walkthrough.narrative, context: walkthroughContext },
+                }
+              : walkthrough,
+          });
+        },
+      });
     }
     return {
-      ...(notFoundCode ? { code: notFoundCode } : {}),
-      reason: result.reason,
-      status: 'unavailable',
+      cacheKey: activeCacheKey,
+      pendingAssessmentThreadIds: [...pendingAssessmentThreadIds],
+      status: 'ready',
+      walkthrough: walkthroughContext
+        ? {
+            ...assessmentPlan.artifact,
+            narrative: { ...assessmentPlan.artifact.narrative, context: walkthroughContext },
+          }
+        : assessmentPlan.artifact,
     };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);

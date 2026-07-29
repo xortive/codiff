@@ -15,6 +15,7 @@ import type {
   NarrativeWalkthroughRequestOptions,
   NarrativeWalkthroughResult,
   OpenReviewSourceKind,
+  NarrativeWalkthroughUpdate,
   PlanHandoffStatus,
   PlanReview,
   RepositoryHistory,
@@ -100,6 +101,9 @@ declare global {
         ) => void,
       ) => () => void;
       onOpenReviewSource: (callback: (kind: OpenReviewSourceKind) => void) => () => void;
+      onNarrativeWalkthroughUpdated: (
+        callback: (update: NarrativeWalkthroughUpdate) => void,
+      ) => () => void;
       onPlanCloseRequested: (callback: () => void) => () => void;
       onRefreshRequest: (callback: () => void) => () => void;
       onRepositoryChanged: (callback: (change: { root: string }) => void) => () => void;

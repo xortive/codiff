@@ -1732,6 +1732,7 @@ export function RepositoryReviewHost({
       providerLabel={
         source.type === 'pull-request' && source.provider === 'gitlab' ? 'GitLab' : 'GitHub'
       }
+      pendingAssessmentThreadIds={pendingAssessmentThreadIds}
       snapshot={snapshot}
       title={title}
     />
