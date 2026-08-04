@@ -27,6 +27,11 @@ import {
 } from '../lib/review-comments.ts';
 import { getFileReviewIdentity } from '../lib/review-identity.ts';
 import { orderReviewCommitStack, reviewCommitRange } from '../lib/review-commit-stack.ts';
+import {
+  suggestReviewComparison,
+  versionOptionHeadSha,
+  versionOptionLabelText,
+} from '../lib/review-history.ts';
 import { getSelectedPathFromScroll } from '../lib/review-scroll.ts';
 import { classifyTargetComparisonReviewStructure } from '../lib/review-strategy.ts';
 import {

@@ -25,6 +25,12 @@ const {
 } = require('./command-log.cjs');
 
 app.setName('Codiff');
+configureCommandLog(app.getPath('logs'), { processStartedAt: electronProcessStartedAt });
+recordCommandMilestone('electron-process-start', {
+  monotonicMs: 0,
+  timestamp: electronProcessStartedAt,
+});
+
 const squirrelStartup = require('electron-squirrel-startup');
 const {
   listRepositoryHistory,
@@ -135,8 +141,10 @@ const { createWalkthroughAssessmentScheduler } = require('./walkthrough-assessme
 const { loadAuthoring, parsePersistedWalkthrough } = require('./walkthrough-authoring-bridge.cjs');
 const {
   narrativeWalkthroughResponseSchema,
+  versionCommitOverviewResponseSchema,
   walkthroughAssessmentResponseSchema,
 } = require('./narrative-walkthrough-schema.cjs');
+const { parseOverviewResponse } = require('./overview-response.cjs');
 const { uploadSharedSnapshot } = require('./shared-walkthrough-upload.cjs');
 const {
   resolvePlanShareTarget,
@@ -462,7 +470,10 @@ const ensureMarkdownDocumentWatcher = (webContents, request) => {
       },
       onDelete: (id) => {
         if (!webContents.isDestroyed()) {
-          webContents.send('codiff:markdownDocumentChanged', { deleted: true, id });
+          webContents.send('codiff:markdownDocumentChanged', {
+            deleted: true,
+            id,
+          });
         }
       },
       resolved,
@@ -494,7 +505,9 @@ const writePlanResult = (webContentsId, status, review) => {
         path: launchOptions.planFile,
         pid: process.pid,
         ...(review
-          ? { reviewPath: getPlanReviewPath(app.getPath('userData'), launchOptions.planFile) }
+          ? {
+              reviewPath: getPlanReviewPath(app.getPath('userData'), launchOptions.planFile),
+            }
           : {}),
         ...(review ? { review } : {}),
         ...(review && planInitialVersions.has(webContentsId)
@@ -571,7 +584,9 @@ const selectAgentModel = (agent, model) => {
     return;
   }
 
-  updateConfig({ settings: { ...config.settings, [agent.modelSettingKey]: normalized } });
+  updateConfig({
+    settings: { ...config.settings, [agent.modelSettingKey]: normalized },
+  });
 };
 
 /** @param {import('./agent.cjs').Agent} agent */
@@ -580,7 +595,9 @@ const getAgentOptions = (agent) => ({
   model: config.settings[agent.modelSettingKey],
   /** @param {string} fallbackModel */
   onModelFallback: async (fallbackModel) => {
-    updateConfig({ settings: { ...config.settings, [agent.modelSettingKey]: fallbackModel } });
+    updateConfig({
+      settings: { ...config.settings, [agent.modelSettingKey]: fallbackModel },
+    });
   },
 });
 
@@ -703,7 +720,10 @@ const openRepositoryFolder = async (browserWindow) => {
     : await dialog.showOpenDialog(options);
 
   if (!result.canceled && result.filePaths[0]) {
-    focusOrCreateWindow(result.filePaths[0], { repositoryPathProvided: true, walkthrough: false });
+    focusOrCreateWindow(result.filePaths[0], {
+      repositoryPathProvided: true,
+      walkthrough: false,
+    });
   }
 };
 
@@ -907,7 +927,10 @@ const buildApplicationMenu = () =>
                 checked: config.settings.wordWrap,
                 click: (menuItem) => {
                   updateConfig({
-                    settings: { ...config.settings, wordWrap: menuItem.checked },
+                    settings: {
+                      ...config.settings,
+                      wordWrap: menuItem.checked,
+                    },
                   });
                 },
                 label: 'Word Wrap',
@@ -917,7 +940,10 @@ const buildApplicationMenu = () =>
                 checked: config.settings.showWhitespace,
                 click: (menuItem) => {
                   updateConfig({
-                    settings: { ...config.settings, showWhitespace: menuItem.checked },
+                    settings: {
+                      ...config.settings,
+                      showWhitespace: menuItem.checked,
+                    },
                   });
                 },
                 label: 'Show Whitespace',
@@ -953,7 +979,10 @@ const buildApplicationMenu = () =>
                 checked: config.settings.showOutdated,
                 click: (menuItem) => {
                   updateConfig({
-                    settings: { ...config.settings, showOutdated: menuItem.checked },
+                    settings: {
+                      ...config.settings,
+                      showOutdated: menuItem.checked,
+                    },
                   });
                 },
                 label: 'Show Outdated Comments',
@@ -963,7 +992,10 @@ const buildApplicationMenu = () =>
                 checked: config.settings.copyCommentsOnClose,
                 click: (menuItem) => {
                   updateConfig({
-                    settings: { ...config.settings, copyCommentsOnClose: menuItem.checked },
+                    settings: {
+                      ...config.settings,
+                      copyCommentsOnClose: menuItem.checked,
+                    },
                   });
                 },
                 label: 'Copy Comments on Close',
@@ -1976,7 +2008,13 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
           phase: 'combining',
           summary: 'Loaded the cached walkthrough.',
           total: 1,
-          units: [{ id: 'narrative', label: 'Walkthrough narrative', status: 'ready' }],
+          units: [
+            {
+              id: 'narrative',
+              label: 'Walkthrough narrative',
+              status: 'ready',
+            },
+          ],
         });
         if (cachedWalkthrough.version !== 5) {
           return {
@@ -2177,7 +2215,10 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
                   ...walkthrough,
                   narrative: {
                     ...walkthrough.narrative,
-                    content: { ...walkthrough.narrative.content, context: walkthroughContext },
+                    content: {
+                      ...walkthrough.narrative.content,
+                      context: walkthroughContext,
+                    },
                   },
                 }
               : walkthrough,
@@ -2210,7 +2251,12 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
       summary: 'Walkthrough generation failed.',
       total: 1,
       units: [
-        { detail: reason, id: 'narrative', label: 'Walkthrough narrative', status: 'failed' },
+        {
+          detail: reason,
+          id: 'narrative',
+          label: 'Walkthrough narrative',
+          status: 'failed',
+        },
       ],
     });
     return {
@@ -2221,19 +2267,6 @@ ipcMain.handle('codiff:getNarrativeWalkthrough', async (event, source, options) 
     walkthroughGenerationCoordinator.finish(event.sender.id, abortController);
   }
 });
-
-/** @param {ReadonlyArray<any>} values @param {number} limit @param {(value: any) => Promise<void>} visit */
-const forEachWalkthroughUnit = async (values, limit, visit) => {
-  let nextIndex = 0;
-  const worker = async () => {
-    while (nextIndex < values.length) {
-      const value = values[nextIndex];
-      nextIndex += 1;
-      await visit(value);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, values.length) }, () => worker()));
-};
 
 ipcMain.handle('codiff:generateReviewWalkthrough', async (event, request) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
@@ -2248,8 +2281,13 @@ ipcMain.handle('codiff:generateReviewWalkthrough', async (event, request) => {
   }
 
   try {
-    reportProgress({ phase: 'preparing', summary: 'Loading target comparison.' });
-    const whole = await readRepositoryStateWithConfig(repositoryPath, request.source);
+    reportProgress({ phase: 'preparing', summary: 'Loading review state.' });
+    const [wholeReviewState, reviewVersionResult] = await Promise.all([
+      readRepositoryStateWithConfig(repositoryPath, request.source),
+      listReviewVersions(repositoryPath, request.source).catch(() => ({
+        versions: [],
+      })),
+    ]);
     const authoring = await loadAuthoring();
     const agent = resolveWindowAgent(event.sender.id);
     const agentOptions = getAgentOptions(agent);
@@ -2266,46 +2304,129 @@ ipcMain.handle('codiff:generateReviewWalkthrough', async (event, request) => {
         settings: {
           scope: scope.kind,
           ...('sha' in scope ? { sha: scope.sha } : {}),
+          ...('unitId' in scope ? { unitId: scope.unitId } : {}),
         },
       });
-    const selection = request.selection;
-    const units =
-      selection.structure === 'commit-by-commit'
-        ? createCommitWalkthroughUnits(request.commits)
-        : undefined;
+
+    /** @type {import('../core/lib/generate-review-walkthrough.ts').WalkthroughGenerationSelection} */
+    let selection;
+    /** @type {import('../core/types.ts').DiffComparisonAnalysis | undefined} */
+    let analysis;
+    /** @type {ReadonlyArray<import('../core/types.ts').ReviewEvolutionUnit> | undefined} */
+    let units;
+    /** @type {import('../core/types.ts').RepositoryState} */
+    let walkthroughState = wholeReviewState;
     /** @type {Record<string, import('../core/types.ts').RepositoryState>} */
     const byCommitSha = {};
-    if (units) {
-      reportProgress({
-        completed: 0,
-        phase: 'preparing',
-        summary: `Preparing ${units.length} commit diffs.`,
-        total: units.length,
-      });
-      await forEachWalkthroughUnit(units, 4, async (unit) => {
-        byCommitSha[unit.commit.sha] = await readRepositoryStateWithConfig(repositoryPath, {
-          ref: unit.commit.sha,
-          type: 'commit',
-        });
-      });
+    /** @type {Record<string, import('../core/types.ts').RepositoryState>} */
+    const byUnitId = {};
+
+    if (request.selection.relation === 'version-comparison') {
+      const comparisonRange = {
+        fromVersionId: request.selection.fromVersionId,
+        toVersionId: request.selection.toVersionId,
+      };
+      const comparisonRun = acquireComparisonRun(null);
+      let versionCompare;
+      let evolutionResult;
+      try {
+        [versionCompare, evolutionResult] = await Promise.all([
+          compareReviewVersionAggregate(
+            repositoryPath,
+            request.source,
+            comparisonRange,
+            reviewVersionResult.versions,
+            {
+              comparisonRun,
+              signal: comparisonRun.controller.signal,
+            },
+          ),
+          classifyReviewVersionEvolution(
+            repositoryPath,
+            request.source,
+            comparisonRange,
+            reviewVersionResult.versions,
+            {
+              comparisonRun,
+              signal: comparisonRun.controller.signal,
+            },
+          ).then(
+            (value) => ({ value }),
+            (error) => ({ error }),
+          ),
+        ]);
+      } finally {
+        releaseComparisonRun(null, comparisonRun);
+      }
+      const evolution = 'value' in evolutionResult ? evolutionResult.value : null;
+      if (request.selection.structure === 'commit-evolution' && !evolution) {
+        throw evolutionResult.error;
+      }
+      const structure =
+        request.selection.structure === 'auto'
+          ? (evolution?.recommendation.suggestedStructure ?? 'complete-comparison')
+          : request.selection.structure;
+      selection = {
+        comparison: versionCompare.comparison,
+        relation: 'version-comparison',
+        structure,
+      };
+      analysis = {
+        ...versionCompare.analysis,
+        ...(evolution ? { commitEvolution: evolution } : {}),
+      };
+      units = evolution?.units;
+      walkthroughState = { ...wholeReviewState, files: versionCompare.files };
+    } else {
+      selection = request.selection;
+      if (request.selection.structure === 'commit-by-commit') {
+        units = createCommitWalkthroughUnits(request.commits);
+      }
     }
 
+    /** @param {import('../core/types.ts').ReviewUnit} unit @param {AbortSignal} [signal] */
+    const materializeUnit = async (unit, signal) => {
+      signal?.throwIfAborted();
+      if (unit.kind === 'commit') {
+        if (!byCommitSha[unit.commit.sha]) {
+          byCommitSha[unit.commit.sha] = await readRepositoryStateWithConfig(repositoryPath, {
+            ref: unit.commit.sha,
+            type: 'commit',
+          });
+        }
+        signal?.throwIfAborted();
+        return byCommitSha[unit.commit.sha];
+      }
+      if (!byUnitId[unit.unitId]) {
+        const files = await loadReviewVersionUnitDiff(repositoryPath, request.source, unit);
+        byUnitId[unit.unitId] = { ...walkthroughState, files };
+      }
+      signal?.throwIfAborted();
+      return byUnitId[unit.unitId];
+    };
+
     const generationRequest = authoring.createWalkthroughGenerationRequest(
-      {
-        range: selection.range,
-        relation: 'target-comparison',
-        structure: selection.structure,
-      },
+      selection.relation === 'version-comparison'
+        ? {
+            comparison: selection.comparison,
+            relation: selection.relation,
+            structure: selection.structure,
+          }
+        : {
+            range: selection.range,
+            relation: selection.relation,
+            structure: selection.structure === 'auto' ? 'net-change' : selection.structure,
+          },
       config.settings.walkthroughPrompt,
     );
     const cacheKey = getLocalReviewWalkthroughCacheKey({
       generationRequest,
       profile: profileForScope({ kind: 'complete-diff' }),
-      state: whole,
+      state: walkthroughState,
     });
     /** @type {import('../core/types.ts').WalkthroughArtifactV5 | null} */
     let artifact = null;
-    if (!request.force) {
+    if (!request.force && !request.regenerateUnitId) {
       const cached = readStoredWalkthrough(cacheKey);
       if (cached?.version === 5) {
         try {
@@ -2316,41 +2437,72 @@ ipcMain.handle('codiff:generateReviewWalkthrough', async (event, request) => {
       }
     }
 
-    const runModel = async ({ profile, prompt, signal }) => {
-      const result = await invokeWalkthroughModel({
-        agent,
-        agentOptions,
-        outputName: 'walkthrough.json',
-        profile,
-        prompt,
-        repoRoot: whole.root,
-        schema: narrativeWalkthroughResponseSchema,
-        signal,
-        timeoutMessage: `${agent.label} walkthrough generation timed out.`,
-        timeoutMs: agent.defaultTimeoutMs || 600_000,
-      });
-      return {
-        generationMetadata: result.generationMetadata,
-        response: parseStructuredModelResponse(result.response),
-      };
-    };
-
     if (!artifact) {
+      let reusableComponents = localReviewReusableComponents.get(cacheKey) ?? [];
+      if (request.force) {
+        reusableComponents = [];
+      } else if (request.regenerateUnitId) {
+        reusableComponents = reusableComponents.filter(
+          (component) =>
+            typeof component.identity !== 'object' ||
+            component.identity.unitId !== request.regenerateUnitId,
+        );
+      }
       const result = await generateReviewWalkthroughShared({
+        analysis,
         customInstructions: config.settings.walkthroughPrompt,
+        materializeUnit,
         narrativeProfile: profileForScope,
         onProgress: reportProgress,
-        reusableComponents: request.force
-          ? []
-          : (localReviewReusableComponents.get(cacheKey) ?? []),
-        runModel,
+        reusableComponents,
+        reviewFocusProfile: profileForScope({ kind: 'complete-diff' }),
+        runModel: async ({ profile, prompt, signal }) => {
+          const generated = await invokeWalkthroughModel({
+            agent,
+            agentOptions,
+            outputName: 'walkthrough.json',
+            profile,
+            prompt,
+            repoRoot: walkthroughState.root,
+            schema: narrativeWalkthroughResponseSchema,
+            signal,
+            timeoutMessage: `${agent.label} walkthrough generation timed out.`,
+            timeoutMs: agent.defaultTimeoutMs || 600_000,
+          });
+          return {
+            generationMetadata: generated.generationMetadata,
+            response: parseStructuredModelResponse(generated.response),
+          };
+        },
+        runReviewFocusModel: async ({ profile, semanticInput, signal }) => {
+          const generated = await invokeWalkthroughModel({
+            agent,
+            agentOptions,
+            outputName: 'walkthrough-focus.json',
+            profile,
+            prompt: authoring.buildReviewFocusPrompt(semanticInput),
+            repoRoot: walkthroughState.root,
+            schema: versionCommitOverviewResponseSchema,
+            signal,
+            timeoutMessage: `${agent.label} walkthrough focus generation timed out.`,
+            timeoutMs: agent.defaultTimeoutMs || 600_000,
+          });
+          return {
+            content: parseOverviewResponse(generated.response).focus,
+            generationMetadata: generated.generationMetadata,
+          };
+        },
         selection,
-        states: { byCommitSha, whole },
+        states: { byCommitSha, byUnitId, whole: walkthroughState },
         units,
       });
       localReviewReusableComponents.set(cacheKey, result.reusableComponents);
       if (result.status !== 'ready') {
-        return { failures: result.failures, reason: result.reason, status: 'failed' };
+        return {
+          failures: result.failures,
+          reason: result.reason,
+          status: 'failed',
+        };
       }
       artifact = result.artifact;
     }
@@ -2358,15 +2510,23 @@ ipcMain.handle('codiff:generateReviewWalkthrough', async (event, request) => {
     const assessmentProfile = authoring.createAssessmentGenerationProfile({
       agent: agent.id,
       modelCandidates,
-      settings: { scope: 'target-comparison-assessment' },
+      settings: { scope: 'assessment' },
     });
+    await mapWithConcurrency(
+      (units ?? []).filter((unit) => unit.reviewable),
+      3,
+      (unit) => materializeUnit(unit),
+    );
     const assessmentPlan = buildWalkthroughAssessmentPlan({
       artifact,
       authoring,
       byCommitSha,
-      comments: whole.reviewComments ?? [],
+      byUnitId,
+      comments: wholeReviewState.reviewComments ?? [],
       profile: assessmentProfile,
+      selection,
       units,
+      versions: reviewVersionResult.versions,
     });
     let assessmentStorageReady = readStoredWalkthrough(cacheKey)?.version === 5;
     try {
@@ -2401,7 +2561,7 @@ ipcMain.handle('codiff:generateReviewWalkthrough', async (event, request) => {
                 outputName: 'walkthrough-assessment.json',
                 profile,
                 prompt,
-                repoRoot: whole.root,
+                repoRoot: walkthroughState.root,
                 schema: walkthroughAssessmentResponseSchema,
                 timeoutMessage: `${agent.label} assessment timed out.`,
               });
@@ -2494,7 +2654,9 @@ ipcMain.handle('codiff:createWalkthroughCommit', async (event, request) => {
     {
       command: 'walkthrough-commit',
       cwd: repositoryPath,
-      details: { fileCount: Array.isArray(request?.paths) ? request.paths.length : 0 },
+      details: {
+        fileCount: Array.isArray(request?.paths) ? request.paths.length : 0,
+      },
     },
     async () => {
       const result = await createWalkthroughCommit(repositoryPath, request, (chunk) => {
@@ -2757,7 +2919,9 @@ ipcMain.handle('codiff:setDiffStyle', (_event, value) => {
 });
 
 ipcMain.handle('codiff:setShowOutdated', (_event, value) => {
-  updateConfig({ settings: { ...config.settings, showOutdated: Boolean(value) } });
+  updateConfig({
+    settings: { ...config.settings, showOutdated: Boolean(value) },
+  });
 });
 
 ipcMain.handle('codiff:setWordWrap', (_event, value) => {

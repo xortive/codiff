@@ -7,13 +7,16 @@ import type {
   TargetComparisonReviewPlan,
   TargetComparisonReviewStructure,
   VersionComparisonReviewPlan,
+  VersionComparisonReviewStructure,
 } from './review-history.ts';
 import type {
   DiffComparison,
   DiffRange,
+  EvolutionUnitId,
   GitSha,
   ResolvedReviewSource,
   ReviewSource,
+  ReviewVersionId,
 } from './review-identity.ts';
 import type { NarrativeWalkthrough, PersistedWalkthrough } from './walkthrough.ts';
 
@@ -103,11 +106,19 @@ export type NarrativeWalkthroughRequestOptions = {
 export type GenerateLocalReviewWalkthroughRequest = {
   commits: ReadonlyArray<ReviewCommitSummary>;
   force?: boolean;
-  selection: {
-    range: DiffRange;
-    relation: 'target-comparison';
-    structure: TargetComparisonReviewStructure;
-  };
+  regenerateUnitId?: EvolutionUnitId;
+  selection:
+    | {
+        range: DiffRange;
+        relation: 'target-comparison';
+        structure: TargetComparisonReviewStructure | 'auto';
+      }
+    | {
+        fromVersionId: ReviewVersionId;
+        relation: 'version-comparison';
+        structure: VersionComparisonReviewStructure | 'auto';
+        toVersionId: ReviewVersionId;
+      };
   source: Extract<ReviewSource, { type: 'pull-request' }>;
 };
 
@@ -122,7 +133,11 @@ export type GenerateLocalReviewWalkthroughResult =
       code?: 'CODEX_NOT_FOUND' | 'CLAUDE_NOT_FOUND' | 'OPENCODE_NOT_FOUND' | 'PI_NOT_FOUND';
       failures?: ReadonlyArray<{
         error: string;
-        identity: 'single' | { kind: 'commit'; sha: GitSha };
+        identity:
+          | 'review-focus'
+          | 'single'
+          | { kind: 'commit'; sha: GitSha }
+          | { kind: 'evolution-unit'; unitId: EvolutionUnitId };
         label: string;
       }>;
       reason: string;

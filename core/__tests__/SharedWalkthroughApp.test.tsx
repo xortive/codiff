@@ -61,6 +61,11 @@ const createMarkdownFile = (path = 'README.md') =>
     ],
   }) satisfies SharedWalkthroughSnapshot['files'][number];
 
+const revision = (sha: GitSha, text: string) => ({
+  label: { kind: 'version' as const, text },
+  sha,
+});
+
 const commenting = {
   canComment: false,
   onDeleteComment: async () => {},
@@ -1008,14 +1013,9 @@ test('selects review versions and loads one Evolution Unit into the Tree', async
     number: 42,
     projectPath: 'example/repo',
     provider: 'gitlab',
-    targetBranch: 'main',
     type: 'pull-request',
     url: 'https://gitlab.example.com/example/repo/-/merge_requests/42',
   } as const;
-  const revision = (sha: GitSha, text: string) => ({
-    label: { kind: 'version' as const, text },
-    sha,
-  });
   const versions = [
     {
       createdAt: '2026-08-03T12:00:00.000Z',

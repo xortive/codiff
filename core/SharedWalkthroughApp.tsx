@@ -203,6 +203,9 @@ const writeSharedSidebarWidth = (width: number) => {
 };
 
 export type ReviewWalkthroughStatus = 'failed' | 'generating' | 'idle' | 'ready';
+export type WalkthroughReviewStructure =
+  | TargetComparisonReviewStructure
+  | VersionComparisonReviewStructure;
 export type ReviewMode = 'comments' | 'history' | 'tree' | 'walkthrough';
 export type ReviewSurfaceCommandBridge = {
   copyPendingComments: () => string;
@@ -363,7 +366,8 @@ export type ReviewWalkthroughCapabilities = {
   generationProgress?: WalkthroughGenerationProgress | null;
   onGenerate?: (options?: {
     force?: boolean;
-    reviewStructure?: TargetComparisonReviewStructure;
+    regenerateUnitId?: EvolutionUnitId;
+    reviewStructure?: WalkthroughReviewStructure;
   }) => Promise<void> | void;
   onShare?: () => Promise<void> | void;
   progress?: ReactNode;
