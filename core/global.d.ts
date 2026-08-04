@@ -22,6 +22,8 @@ import type {
   ResolvedReviewSource,
   ReviewAssistantRequest,
   ReviewAssistantResult,
+  ReviewContextRequest,
+  ReviewContextResult,
   ReviewSource,
   SaveMarkdownDocumentRequest,
   SaveMarkdownDocumentResult,
@@ -114,6 +116,10 @@ declare global {
       ) => void;
       resetCodeFontSize: () => Promise<void>;
       resolvePullRequestUrl: (value: string) => Promise<string>;
+      resolveReviewContext: (
+        request: ReviewContextRequest,
+        requestId?: string,
+      ) => Promise<ReviewContextResult>;
       saveMarkdownDocument: (
         request: SaveMarkdownDocumentRequest,
       ) => Promise<SaveMarkdownDocumentResult>;
