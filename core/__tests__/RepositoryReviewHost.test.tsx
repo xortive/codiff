@@ -304,6 +304,103 @@ test('standalone commit preparation remains available without a ready walkthroug
   }
 });
 
+test('requests commit-by-commit generation with canonical commits and the immutable range', async () => {
+  const baseSha = '0'.repeat(40) as GitSha;
+  const firstSha = 'a'.repeat(40) as GitSha;
+  const secondSha = 'b'.repeat(40) as GitSha;
+  const range = {
+    base: { label: { kind: 'commit' as const, text: 'main' }, sha: baseSha },
+    head: { label: { kind: 'commit' as const, text: 'Head' }, sha: secondSha },
+  };
+  const generateReviewWalkthrough = vi.fn(async () => ({
+    reason: 'Stop after capturing the request.',
+    status: 'failed' as const,
+  }));
+  window.codiff = {
+    generateReviewWalkthrough,
+    isWindowFullScreen: vi.fn(async () => false),
+    onConfigChanged: vi.fn(() => unsubscribe),
+    onCopyPendingCommentsRequest: vi.fn(() => unsubscribe),
+    onFindInDiffs: vi.fn(() => unsubscribe),
+    onNarrativeWalkthroughUpdated: vi.fn(() => unsubscribe),
+    onRefreshRequest: vi.fn(() => unsubscribe),
+    onRepositoryChanged: vi.fn(() => unsubscribe),
+    onWalkthroughProgress: vi.fn(() => unsubscribe),
+    onWindowFullScreenChanged: vi.fn(() => unsubscribe),
+  } as unknown as Window['codiff'];
+  const file = createChangedFile('src/review.ts');
+  const source = {
+    description: 'Please review each commit.',
+    headSha: secondSha,
+    number: 42,
+    provider: 'github',
+    targetBranch: 'main',
+    title: 'Review the commit stack',
+    type: 'pull-request',
+    url: 'https://github.com/example/review/pull/42',
+  } as const;
+  const pullRequestState = {
+    ...state,
+    files: [
+      {
+        ...file,
+        sections: file.sections.map((section) => ({ ...section, range })),
+      },
+    ],
+    source,
+  } satisfies RepositoryState;
+
+  const view = await renderReact(
+    <RepositoryReviewHost
+      config={createDefaultConfig()}
+      disableCodeViewWorkerPool
+      gitIdentity={null}
+      initialHistory={[
+        {
+          author: 'Ada',
+          committedAt: 0,
+          parentShas: [],
+          scope: 'base',
+          sha: baseSha,
+          subject: 'Prepare main',
+        },
+        {
+          author: 'Ada',
+          committedAt: 1,
+          parentShas: [baseSha],
+          scope: 'pull-request',
+          sha: firstSha,
+          subject: 'Add model',
+        },
+        {
+          author: 'Ada',
+          committedAt: 2,
+          parentShas: [firstSha],
+          scope: 'pull-request',
+          sha: secondSha,
+          subject: 'Test model',
+        },
+      ]}
+      initialMode="walkthrough"
+      launchOptions={{ repositoryPathProvided: true, walkthrough: true }}
+      state={pullRequestState}
+    />,
+  );
+  try {
+    await waitFor(() => expect(generateReviewWalkthrough).toHaveBeenCalledOnce());
+    expect(generateReviewWalkthrough).toHaveBeenCalledWith({
+      commits: [
+        expect.objectContaining({ sha: firstSha, subject: 'Add model' }),
+        expect.objectContaining({ sha: secondSha, subject: 'Test model' }),
+      ],
+      selection: { range, relation: 'target-comparison', structure: 'commit-by-commit' },
+      source,
+    });
+  } finally {
+    await view.cleanup();
+  }
+});
+
 test('loads an oldest-first commit range after host-side ancestry validation', async () => {
   const baseSha = '0'.repeat(40) as GitSha;
   const firstSha = 'a'.repeat(40) as GitSha;

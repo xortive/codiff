@@ -11,6 +11,8 @@ import type {
   DiffImageContentResult,
   DiffSection,
   DiffSectionContentRequest,
+  GenerateLocalReviewWalkthroughRequest,
+  GenerateLocalReviewWalkthroughResult,
   GitIdentity,
   NarrativeWalkthroughRequestOptions,
   NarrativeWalkthroughResult,
@@ -58,6 +60,9 @@ declare global {
       ) => Promise<WalkthroughCommitResult>;
       decreaseCodeFontSize: () => Promise<void>;
       dismissUpdate: () => Promise<CodiffUpdateStatus>;
+      generateReviewWalkthrough: (
+        request: GenerateLocalReviewWalkthroughRequest,
+      ) => Promise<GenerateLocalReviewWalkthroughResult>;
       getAgentSkillStatus: () => Promise<AgentSkillStatus>;
       getConfig: () => Promise<CodiffConfig>;
       getDiffImageContent: (request: DiffImageContentRequest) => Promise<DiffImageContentResult>;
