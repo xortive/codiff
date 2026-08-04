@@ -22,6 +22,7 @@ const {
   readDiffSectionContent,
   readGitIdentity,
   readRepositoryState,
+  readReviewComments,
   readWalkthroughRepositoryState,
   submitPullRequestComment,
   submitPullRequestReview,
@@ -1807,6 +1808,14 @@ ipcMain.handle('codiff:getDiffImageContent', async (event, request) => {
 ipcMain.handle('codiff:getRepositoryHistory', async (event, limit, source) => {
   const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
   return listRepositoryHistory(repositoryPath, limit, source);
+});
+
+ipcMain.handle('codiff:getReviewComments', async (event, source) => {
+  if (source?.type !== 'pull-request') {
+    throw new Error('Review comments require a pull-request source.');
+  }
+  const repositoryPath = windowRepositories.get(event.sender.id) || getLaunchPath();
+  return readReviewComments(repositoryPath, source);
 });
 
 ipcMain.handle('codiff:getGitIdentity', async (event) => {

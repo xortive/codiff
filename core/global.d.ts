@@ -72,6 +72,9 @@ declare global {
       getPreferences: () => Promise<CodiffPreferences>;
       getRepositoryHistory: (limit?: number, source?: ReviewSource) => Promise<RepositoryHistory>;
       getRepositoryState: (source?: ReviewSource) => Promise<RepositoryState>;
+      getReviewComments: (
+        source: Extract<ReviewSource, { type: 'pull-request' }>,
+      ) => Promise<ReadonlyArray<PullRequestExistingReviewComment>>;
       getTerminalHelperStatus: () => Promise<TerminalHelperStatus>;
       getUpdateStatus: () => Promise<CodiffUpdateStatus>;
       increaseCodeFontSize: () => Promise<void>;
