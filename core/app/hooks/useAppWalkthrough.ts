@@ -15,7 +15,7 @@ import type {
   ChangedFile,
   CodiffPreferences,
   NarrativeWalkthroughResult,
-  NarrativeWalkthroughRequestOptions,
+  NarrativeWalkthroughRequest,
   PersistedWalkthrough,
   RepositoryState,
   SharedWalkthroughSnapshot,
@@ -36,6 +36,7 @@ type UseAppWalkthroughOptions = {
   initialWalkthroughLoading?: boolean;
   initialWalkthroughResult?: NarrativeWalkthroughResult;
   preferencesRef: RefObject<CodiffPreferences>;
+  preventAutomaticGeneration?: boolean;
   state: RepositoryState | null;
   stateGenerationRef: RefObject<number>;
   stateRef: RefObject<RepositoryState | null>;
@@ -51,6 +52,7 @@ export function useAppWalkthrough({
   initialWalkthroughLoading = false,
   initialWalkthroughResult,
   preferencesRef,
+  preventAutomaticGeneration = false,
   state,
   stateGenerationRef,
   stateRef,
@@ -66,7 +68,9 @@ export function useAppWalkthrough({
   const [shareWalkthroughEnabled, setShareWalkthroughEnabled] = useState(false);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>(initialSidebarMode);
   const [walkthroughError, setWalkthroughError] = useState<WalkthroughError | null>(() =>
-    initialWalkthroughResult?.status === 'unavailable' ? initialWalkthroughResult : null,
+    initialWalkthroughResult?.status === 'unavailable' && !initialWalkthroughFileError
+      ? initialWalkthroughResult
+      : null,
   );
   const [walkthroughFileError, setWalkthroughFileError] = useState<WalkthroughFileError | null>(
     initialWalkthroughFileError,
@@ -176,7 +180,7 @@ export function useAppWalkthrough({
         setNarrativeWalkthrough(parseWalkthroughModel(initialWalkthroughResult.walkthrough));
         setWalkthroughError(null);
       } else {
-        setWalkthroughError(initialWalkthroughResult);
+        setWalkthroughError(initialWalkthroughFileError ? null : initialWalkthroughResult);
       }
       setWalkthroughFileError(initialWalkthroughFileError);
     });
@@ -290,9 +294,10 @@ export function useAppWalkthrough({
   );
 
   const loadNarrativeWalkthrough = useCallback(
-    (source: RepositoryState['source'], options?: NarrativeWalkthroughRequestOptions) => {
+    (walkthroughRequest: NarrativeWalkthroughRequest) => {
       const request = walkthroughRequestRef.current + 1;
       walkthroughRequestRef.current = request;
+      const source = walkthroughRequest.source;
       const sourceKey = getSourceRevisionKey(source);
       const stateGeneration = stateGenerationRef.current;
       const isCurrentState = () =>
@@ -304,7 +309,7 @@ export function useAppWalkthrough({
       activeWalkthroughCacheKeyRef.current = null;
       setPendingAssessmentThreadIds(emptyPendingAssessmentThreadIds);
       return window.codiff
-        .getNarrativeWalkthrough(source, options)
+        .getNarrativeWalkthrough(walkthroughRequest)
         .then((result) => {
           if (!isCurrentState()) {
             return;
@@ -374,9 +379,14 @@ export function useAppWalkthrough({
         return;
       }
 
-      loadNarrativeWalkthrough(nextState.source, {
+      if (nextState.source.type === 'pull-request') {
+        return;
+      }
+      loadNarrativeWalkthrough({
         force: true,
+        kind: 'single-diff',
         previousWalkthrough: previousWalkthrough ?? undefined,
+        source: nextState.source,
       });
     },
     [loadNarrativeWalkthrough, setWalkthroughLoading],
@@ -397,7 +407,16 @@ export function useAppWalkthrough({
 
       setSidebarMode('walkthrough');
       setWalkthroughUnread(false);
-      if (narrativeWalkthrough || walkthroughError || walkthroughLoading || !state) {
+      if (
+        narrativeWalkthrough ||
+        walkthroughError ||
+        walkthroughLoading ||
+        initialWalkthroughFileError ||
+        initialWalkthroughLoading ||
+        !state ||
+        preventAutomaticGeneration ||
+        state.source.type === 'pull-request'
+      ) {
         return;
       }
       if (state.files.length === 0) {
@@ -409,13 +428,16 @@ export function useAppWalkthrough({
         return;
       }
 
-      loadNarrativeWalkthrough(state.source);
+      loadNarrativeWalkthrough({ kind: 'single-diff', source: state.source });
     },
     [
       loadNarrativeWalkthrough,
+      initialWalkthroughFileError,
       narrativeWalkthrough,
+      initialWalkthroughLoading,
       setWalkthroughLoading,
       state,
+      preventAutomaticGeneration,
       walkthroughError,
       walkthroughLoading,
     ],

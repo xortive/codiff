@@ -26,6 +26,7 @@ import {
   type WalkthroughStopView,
 } from '../../../lib/narrative-walkthrough.ts';
 import type { ChangedFile, WalkthroughHunkGroup, WalkthroughModel } from '../../../types.ts';
+import { CommitRefTooltip } from '../CommitRefTooltip.tsx';
 import { ReadOnlyMarkdownView } from '../ReadOnlyMarkdownView.tsx';
 import type { ReviewDiffBlock } from '../ReviewCodeView.tsx';
 import {
@@ -238,16 +239,24 @@ const emptyWalkthroughBlockSet: WalkthroughBlockSet = {
 // `codiff-selected-item` class on the virtualized item container, so the header
 // item's content and version stay stable while scrolling moves the selection.
 function StopHeader({
+  boundary,
   codeIssues,
   onRegionLink,
   stop,
 }: {
+  boundary?: WalkthroughView['chapters'][number]['boundary'];
   codeIssues: ReadonlyArray<WalkthroughCodeIssue>;
   onRegionLink: (regionId: string) => void;
   stop: WalkthroughStopView;
 }) {
   return (
     <div className="wt-stop-block wt-stop-block-header">
+      {boundary ? (
+        <div className="wt-unit-boundary">
+          <span>Commit</span>
+          <CommitRefTooltip className="wt-unit-commit-ref" commit={boundary.commit} />
+        </div>
+      ) : null}
       <div className="wt-stage-title-row">
         <h2 className="wt-stage-title">{stop.title ?? walkthroughItemTitleFallback(stop)}</h2>
         <ImportancePill importance={stop.importance} />
@@ -319,6 +328,8 @@ const createWalkthroughBlocks = (
   };
 
   for (const stop of walkthroughView.sequence) {
+    const chapter = walkthroughView.chapters.find((candidate) => candidate.id === stop.chapterId);
+    const boundary = chapter?.stops[0]?.id === stop.id ? chapter.boundary : undefined;
     const focusedRuns = getFocusedRunDiffs(stop, files);
     const codeIssues = getWalkthroughCodeIssues(stop, files, focusedRuns);
     if (focusedRuns.length === 0) {
@@ -326,7 +337,14 @@ const createWalkthroughBlocks = (
       firstBlockIdByStop[stop.index] = blockId;
       stopIndexByBlockId.set(blockId, stop.index);
       blocks.push({
-        header: <StopHeader codeIssues={codeIssues} onRegionLink={routeRegionLink} stop={stop} />,
+        header: (
+          <StopHeader
+            boundary={boundary}
+            codeIssues={codeIssues}
+            onRegionLink={routeRegionLink}
+            stop={stop}
+          />
+        ),
         headerSelected: stop.index === currentIndex,
         id: blockId,
       });
@@ -366,7 +384,12 @@ const createWalkthroughBlocks = (
         file,
         header:
           runIndex === 0 ? (
-            <StopHeader codeIssues={codeIssues} onRegionLink={routeRegionLink} stop={stop} />
+            <StopHeader
+              boundary={boundary}
+              codeIssues={codeIssues}
+              onRegionLink={routeRegionLink}
+              stop={stop}
+            />
           ) : null,
         headerSelected: stop.index === currentIndex,
         id: blockId,
@@ -564,6 +587,12 @@ function Arc({
               <span className="wt-arc-chapter-label">
                 <ChapterIcon icon={chapter.icon} size={13} />
                 {chapter.title}
+                {chapter.boundary ? (
+                  <CommitRefTooltip
+                    className="wt-unit-commit-ref"
+                    commit={chapter.boundary.commit}
+                  />
+                ) : null}
               </span>
               <div className="wt-arc-nodes">
                 {chapter.stops.map((stop) => {

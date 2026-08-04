@@ -31,13 +31,14 @@ import {
   toProviderSubmittedReviewComment,
   toPullRequestExistingReviewComment,
 } from '../lib/review-comments.ts';
+import { orderReviewCommitStack, reviewCommitRange } from '../lib/review-commit-stack.ts';
 import {
   createReviewContentRun,
   type ReviewContentRun,
   type ReviewContentTransport,
 } from '../lib/review-content.ts';
-import { orderReviewCommitStack, reviewCommitRange } from '../lib/review-commit-stack.ts';
 import { getFileReviewIdentity } from '../lib/review-identity.ts';
+import { classifyTargetComparisonReviewStructure } from '../lib/review-strategy.ts';
 import {
   getHistorySource,
   getRefreshSource,
@@ -73,6 +74,7 @@ import type {
   RepositoryState,
   ReviewCommitListEntry,
   ReviewSource,
+  TargetComparisonReviewStructure,
   DiffSection,
 } from '../types.ts';
 import { OpenReviewSourceDialog } from './components/OpenReviewSourceDialog.tsx';
@@ -704,6 +706,7 @@ export function RepositoryReviewHost({
     initialWalkthroughLoading,
     initialWalkthroughResult,
     preferencesRef,
+    preventAutomaticGeneration: Boolean(launchOptions.walkthroughFile),
     state,
     stateGenerationRef,
     stateRef,
@@ -721,12 +724,16 @@ export function RepositoryReviewHost({
     }
     walkthroughFileFallbackAppliedRef.current = true;
     changeSidebarMode('history');
+    setWalkthroughError(null);
+    setWalkthroughLoading(false);
   }, [
     bootstrap.source,
     changeSidebarMode,
     initialWalkthroughFileError,
     initialWalkthroughResult,
     state,
+    setWalkthroughError,
+    setWalkthroughLoading,
   ]);
 
   useEffect(() => {
@@ -1819,13 +1826,15 @@ export function RepositoryReviewHost({
       : source.type === 'commit'
         ? state.commitMetadata?.subject?.trim() || getSourceLabel(source)
         : getSourceLabel(source);
-  const walkthroughStatus: ReviewWalkthroughStatus = walkthroughLoading
-    ? 'generating'
-    : narrativeWalkthrough
-      ? 'ready'
-      : walkthroughError
-        ? 'failed'
-        : 'idle';
+  const walkthroughStatus: ReviewWalkthroughStatus = walkthroughFileError
+    ? 'idle'
+    : walkthroughLoading
+      ? 'generating'
+      : narrativeWalkthrough
+        ? 'ready'
+        : walkthroughError
+          ? 'failed'
+          : 'idle';
   const walkthroughAgent = launchOptions.agentBackend ?? config.settings.agentBackend;
   const snapshotState =
     reviewCommentRegions?.sourceKey === `${state.root}:${getSourceRevisionKey(state.source)}`
@@ -1835,6 +1844,23 @@ export function RepositoryReviewHost({
         }
       : state;
   const reviewCommits = source.type === 'pull-request' ? toMergeRequestCommits(historyEntries) : [];
+  const reviewClassification =
+    source.type === 'pull-request'
+      ? classifyTargetComparisonReviewStructure({
+          commits: reviewCommits.map((commit) => ({
+            authoredAt: commit.authoredAt,
+            authorName: commit.authorName,
+            message: commit.subject,
+            parentShas: commit.parentShas,
+            sha: commit.sha,
+            shortSha: commit.shortSha,
+            title: commit.subject,
+            ...(commit.webUrl ? { webUrl: commit.webUrl } : {}),
+          })),
+          description: source.description,
+          title: source.title,
+        })
+      : null;
   const targetBaseSha = source.type === 'pull-request' ? getTargetBaseSha(state) : null;
   const targetBaseEntry = targetBaseSha
     ? historyEntries.find((entry) => entry.scope === 'base' && entry.sha === targetBaseSha)
@@ -1842,6 +1868,11 @@ export function RepositoryReviewHost({
   const snapshot = {
     ...buildSharedReviewSnapshot({
       preferences,
+      reviewStructure:
+        narrativeWalkthrough?.structure === 'commit-by-commit' ||
+        narrativeWalkthrough?.structure === 'net-change'
+          ? narrativeWalkthrough.structure
+          : (reviewClassification?.structure ?? 'net-change'),
       state: snapshotState,
       title,
       walkthrough:
@@ -1853,6 +1884,46 @@ export function RepositoryReviewHost({
           reviewComments: providerInlineComments.map(toPullRequestExistingReviewComment),
         }
       : {}),
+  };
+  const generateWalkthrough = (options?: {
+    force?: boolean;
+    reviewStructure?: TargetComparisonReviewStructure;
+  }) => {
+    if (launchOptions.walkthroughFile || initialWalkthroughFileError || initialWalkthroughLoading) {
+      return;
+    }
+    if (source.type !== 'pull-request') {
+      return loadNarrativeWalkthrough({
+        ...(options?.force ? { force: true } : {}),
+        kind: 'single-diff',
+        source,
+      });
+    }
+    if (!initialHistoryComplete) {
+      return;
+    }
+    const range = state.files
+      .flatMap((file) => file.sections)
+      .find((section) => section.range)?.range;
+    if (!range) {
+      setWalkthroughError({
+        reason: 'The pull request diff does not expose an immutable review range.',
+        status: 'unavailable',
+      });
+      return;
+    }
+    return loadNarrativeWalkthrough({
+      commits: reviewCommits,
+      ...(options?.force ? { force: true } : {}),
+      kind: 'target-comparison',
+      previousWalkthrough: persistedNarrativeWalkthrough ?? undefined,
+      selection: {
+        range,
+        relation: 'target-comparison',
+        structure: options?.reviewStructure ?? reviewClassification?.structure ?? 'net-change',
+      },
+      source,
+    });
   };
   const branchSource =
     historySource?.type === 'branch-diff'
@@ -1949,15 +2020,8 @@ export function RepositoryReviewHost({
               />
               <RepositoryRefreshBanner
                 onRestartWalkthrough={() => {
-                  const currentState = stateRef.current;
-                  if (!currentState) {
-                    return;
-                  }
                   setWalkthroughStale(false);
-                  void loadNarrativeWalkthrough(currentState.source, {
-                    force: true,
-                    previousWalkthrough: persistedNarrativeWalkthroughRef.current ?? undefined,
-                  });
+                  void generateWalkthrough({ force: true });
                 }}
                 onRetry={refreshRepository}
                 status={repositoryRefreshStatus}
@@ -2097,13 +2161,14 @@ export function RepositoryReviewHost({
                 updateCommitMessage: updateWalkthroughCommitMessage,
               }
             : {}),
-          error: walkthroughError,
-          generationProgress: walkthroughProgress.generation,
-          onGenerate: () => loadNarrativeWalkthrough(source),
+          error: walkthroughFileError ? null : walkthroughError,
+          generationProgress: walkthroughFileError ? null : walkthroughProgress.generation,
+          onGenerate: generateWalkthrough,
           onShare: enabledShareWalkthrough,
-          progress: (
+          progress: walkthroughFileError ? null : (
             <WalkthroughProgress
               phase={walkthroughProgress.phase}
+              progress={walkthroughProgress.generation}
               responseLabelIndex={walkthroughProgress.responseLabelIndex}
               stageRevision={walkthroughProgress.stageRevision}
             />

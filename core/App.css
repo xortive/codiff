@@ -1692,6 +1692,45 @@ html[data-codiff-platform='darwin'] .sidebar {
   white-space: nowrap;
   z-index: 1;
 }
+.walkthrough-structure-controls {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.walkthrough-structure-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.walkthrough-structure-controls select {
+  background: var(--sidebar-background);
+  border: 1px solid var(--sidebar-border);
+  border-radius: 4px;
+  color: var(--sidebar-text);
+  font: inherit;
+  min-width: 0;
+  padding: 2px 4px;
+}
+.walkthrough-structure-error {
+  color: var(--error-color);
+  flex-basis: 100%;
+}
+.walkthrough-structure-controls button {
+  background: transparent;
+  border: 0;
+  color: var(--link);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+.walkthrough-structure-controls button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
 
 .history-list > .history-section:first-child {
   margin-top: 0;
