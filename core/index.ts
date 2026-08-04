@@ -177,6 +177,7 @@ export type {
   ProviderReviewCommentPosition,
   ReviewCommenting,
   ReviewCommentPosition,
+  ReviewCommitListEntry,
   ReviewCommitSummary,
   ReviewCommitUnit,
   ReviewPreferences,
