@@ -145,7 +145,6 @@ export type ReviewArtifactRun = ReviewArtifactSource & {
 
 export const createFileBlobArtifactRequestKey = ({ path, ref }: FileBlobArtifactRequest) =>
   `${ref}:${path}`;
-
 export const createCommitArtifactRequestKey = ({
   commitSha,
   parentSha,
