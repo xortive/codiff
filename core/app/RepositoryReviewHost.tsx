@@ -1896,6 +1896,9 @@ export function RepositoryReviewHost({
       return loadNarrativeWalkthrough({
         ...(options?.force ? { force: true } : {}),
         kind: 'single-diff',
+        ...(options?.force && persistedNarrativeWalkthrough
+          ? { previousWalkthrough: persistedNarrativeWalkthrough }
+          : {}),
         source,
       });
     }

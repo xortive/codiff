@@ -2,6 +2,9 @@
 
 const { fileSort, getFingerprint, git, summarizeContent } = require('./common.cjs');
 const { createEmptyFileContent, readGitFiles } = require('./git-files.cjs');
+const { mapWithConcurrency } = require('../bounded-map.cjs');
+
+const MAX_COMPARISON_PATCH_FALLBACK_CONCURRENCY = 8;
 
 /**
  * @typedef {import('../../core/types.ts').ChangedFile} ChangedFile
@@ -18,9 +21,9 @@ const createComparisonPatchArgs = (newSha, oldSha, paths) =>
     ? ['diff', '--patch', '--no-ext-diff', '--find-renames', oldSha, newSha, '--', ...paths]
     : ['show', '--format=', '--patch', '--no-ext-diff', '--find-renames', newSha, '--', ...paths];
 
-/** @param {string} repoRoot @param {GitSha} newSha @param {GitSha | undefined} oldSha @param {string} path */
-const readComparisonPatch = (repoRoot, newSha, oldSha, path) =>
-  git(repoRoot, createComparisonPatchArgs(newSha, oldSha, [path]));
+/** @param {string} repoRoot @param {GitSha} newSha @param {GitSha | undefined} oldSha @param {string} path @param {{signal?: AbortSignal}} [options] */
+const readComparisonPatch = (repoRoot, newSha, oldSha, path, options = {}) =>
+  git(repoRoot, createComparisonPatchArgs(newSha, oldSha, [path]), options);
 
 /** @param {ReadonlyArray<string>} values @param {number} size */
 const chunk = (values, size) => {
@@ -41,12 +44,36 @@ const splitCommitPatch = (patch) =>
     .map((part) => `${part}\n`);
 
 /**
+ * A malformed or unexpectedly combined bulk patch falls back to individual
+ * Git reads. Keep that recovery path bounded: a 200-path batch must not turn
+ * into 200 child processes at once.
+ *
+ * @param {ReadonlyArray<string>} paths
+ * @param {(path: string) => Promise<string>} readPatch
+ * @returns {Promise<Map<string, string>>}
+ */
+const readComparisonPatchFallbacks = async (paths, readPatch) => {
+  /** @type {Map<string, string>} */
+  const patches = new Map();
+  const values = await mapWithConcurrency(
+    paths,
+    MAX_COMPARISON_PATCH_FALLBACK_CONCURRENCY,
+    readPatch,
+  );
+  for (let index = 0; index < paths.length; index += 1) {
+    patches.set(paths[index], values[index]);
+  }
+  return patches;
+};
+
+/**
  * @param {string} repoRoot
  * @param {GitSha} newSha
  * @param {GitSha | undefined} oldSha
  * @param {ReadonlyArray<Pick<StatusItem, 'path'>>} items
+ * @param {{signal?: AbortSignal}} [options]
  */
-const readComparisonPatches = async (repoRoot, newSha, oldSha, items) => {
+const readComparisonPatches = async (repoRoot, newSha, oldSha, items, options = {}) => {
   /** @type {Map<string, string>} */
   const patches = new Map();
 
@@ -58,7 +85,11 @@ const readComparisonPatches = async (repoRoot, newSha, oldSha, items) => {
       continue;
     }
 
-    const patch = await git(repoRoot, createComparisonPatchArgs(newSha, oldSha, itemChunk));
+    const patch = await git(
+      repoRoot,
+      createComparisonPatchArgs(newSha, oldSha, itemChunk),
+      options,
+    );
     const patchChunks = splitCommitPatch(patch);
 
     if (patchChunks.length === itemChunk.length) {
@@ -66,11 +97,12 @@ const readComparisonPatches = async (repoRoot, newSha, oldSha, items) => {
         patches.set(itemChunk[index], patchChunks[index]);
       }
     } else {
-      await Promise.all(
-        itemChunk.map(async (path) => {
-          patches.set(path, await readComparisonPatch(repoRoot, newSha, oldSha, path));
-        }),
+      const fallbackPatches = await readComparisonPatchFallbacks(itemChunk, (path) =>
+        readComparisonPatch(repoRoot, newSha, oldSha, path, options),
       );
+      for (const [path, fallbackPatch] of fallbackPatches) {
+        patches.set(path, fallbackPatch);
+      }
     }
   }
 
@@ -216,5 +248,6 @@ const readComparisonState = async ({ launchPath, newSha, oldSha, repoRoot, sourc
 };
 
 module.exports = {
+  readComparisonPatchFallbacks,
   readComparisonState,
 };
