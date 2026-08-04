@@ -189,6 +189,20 @@ process.stdin.on('end', () => {
       },
       base: { sha: '${base}' },
     }));
+  } else if (pathArg.includes('/compare/')) {
+    process.stdout.write(JSON.stringify({
+      commits: [{
+        commit: {
+          author: { date: '2026-01-03T00:00:00.000Z', name: 'Ada' },
+          message: 'Current head',
+        },
+        parents: [{ sha: '${base}' }],
+        sha: '${current}',
+      }],
+      files: [],
+      merge_base_commit: { sha: '${base}' },
+      total_commits: 1,
+    }));
   } else if (pathArg === '/user') {
     process.stdout.write(JSON.stringify({ login: 'reviewer' }));
   } else if (
@@ -237,7 +251,10 @@ process.stdin.on('end', () => {
       readPullRequestReviewComments: (
         repoRoot: string,
         source: { url: string },
-      ) => Promise<ReadonlyArray<unknown>>;
+      ) => Promise<{
+        generalComments: ReadonlyArray<unknown>;
+        reviewComments: ReadonlyArray<unknown>;
+      }>;
     };
     const source = {
       number: 12,
@@ -262,7 +279,7 @@ process.stdin.on('end', () => {
       listGitHubReviewVersions(directory, source, { includeActivity: true }),
       listGitHubReviewVersions(directory, source, { includeActivity: true }),
     ]);
-    expect(comments).toEqual([]);
+    expect(comments).toEqual({ generalComments: [], reviewComments: [] });
     const { versions, warning } = initial;
     expect(warning).toBeNull();
     expect(warmInitial.versions).toEqual(versions);

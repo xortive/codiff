@@ -18,6 +18,7 @@ import {
   type ExpansionDirections,
   type FileDiffLoadedFiles,
   type FileDiffMetadata,
+  getLineAnnotationName,
   type LineAnnotation,
   type SelectedLineRange,
 } from '@pierre/diffs';
@@ -76,6 +77,7 @@ import {
   statusLabel,
   workerHighlighterOptions,
 } from '../../lib/code-view-options.ts';
+import { installStableWalkthroughScrollAnchoring } from '../../lib/code-view-scroll-anchor.ts';
 import {
   canRenderImagePreview,
   getDiffLineCountFromVisibleSections,
@@ -2455,6 +2457,15 @@ function WalkthroughRegionAnnotation({
   );
 }
 
+const applyWalkthroughRegionAnnotationState = (node: ParentNode, activeRegionId?: string) => {
+  for (const annotation of node.querySelectorAll<HTMLElement>('.walkthrough-region-annotation')) {
+    annotation.classList.toggle(
+      'active',
+      annotation.dataset.walkthroughRegionId === activeRegionId,
+    );
+  }
+};
+
 const formatReplayLineRange = ({ end, start }: { end: number; start: number }) => {
   const firstLine = start + 1;
   const lastLine = end;
@@ -3429,6 +3440,14 @@ export function ReviewCodeView({
   const highlightFrameRef = useRef<number | null>(null);
   const ignoreNextLineSelectionEndRef = useRef(false);
   const navigatedSelectionRef = useRef<CodeViewLineSelection | null>(null);
+  const renderedItemNodesRef = useRef(new Map<string, HTMLElement>());
+  const usesWalkthroughBlocks = blocks != null;
+  useLayoutEffect(() => {
+    const viewer = codeViewRef.current?.getInstance();
+    return usesWalkthroughBlocks && viewer
+      ? installStableWalkthroughScrollAnchoring(viewer)
+      : undefined;
+  }, [usesWalkthroughBlocks]);
   const initialMarkdownFiles =
     files.length > 0
       ? files
@@ -3523,6 +3542,9 @@ export function ReviewCodeView({
   const stickyHeaderFrameRef = useRef<number | null>(null);
 
   const reviewBlocks = useMemo(() => blocks ?? createFileReviewBlocks(files), [blocks, files]);
+  const activeHeaderBlockId =
+    reviewBlocks.find((block) => block.header && (block.headerSelected ?? block.selected) === true)
+      ?.id ?? null;
   const hasRegionalReplay = reviewBlocks.some((block) => block.file?.regionalReplay != null);
   const codeProjectionKey = useMemo(
     () => getReviewCodeProjectionKey(blocks, files, showWhitespace),
@@ -3934,6 +3956,24 @@ export function ReviewCodeView({
     reviewIdentityByPath,
     walkthroughNotes,
   ]);
+
+  useLayoutEffect(() => {
+    for (const [itemId, node] of renderedItemNodesRef.current) {
+      node.classList.toggle(
+        'codiff-active-walkthrough-header-item',
+        itemBlockId.get(itemId) === activeHeaderBlockId,
+      );
+      const metadata = itemMetadata.get(itemId);
+      if (node.shadowRoot) {
+        applyWalkthroughRegionHighlights(
+          node.shadowRoot,
+          metadata?.walkthroughRegions ?? [],
+          metadata?.activeWalkthroughRegionId,
+        );
+      }
+      applyWalkthroughRegionAnnotationState(node, metadata?.activeWalkthroughRegionId);
+    }
+  }, [activeHeaderBlockId, itemBlockId, itemMetadata]);
 
   const getSectionExpansionKey = useCallback(
     (itemId: string) => {
@@ -4558,6 +4598,18 @@ export function ReviewCodeView({
             'codiff-selected-item',
             metadata?.isSelected === true || selectedHeaderItemIds.has(context.item.id),
           );
+          if (phase === 'unmount') {
+            if (renderedItemNodesRef.current.get(context.item.id) === node) {
+              renderedItemNodesRef.current.delete(context.item.id);
+            }
+          } else {
+            renderedItemNodesRef.current.set(context.item.id, node);
+          }
+          node.classList.toggle(
+            'codiff-active-walkthrough-header-item',
+            isWalkthroughHeaderItem && itemBlockId.get(context.item.id) === activeHeaderBlockId,
+          );
+          applyWalkthroughRegionAnnotationState(node, metadata?.activeWalkthroughRegionId);
           node.classList.toggle(
             'codiff-markdown-preview-item',
             metadata?.isMarkdownPreview === true,
@@ -4619,7 +4671,9 @@ export function ReviewCodeView({
       diffStyle,
       hasRegionalReplay,
       isReadOnly,
+      activeHeaderBlockId,
       itemMetadata,
+      itemBlockId,
       loadDiffFiles,
       loadingSectionIds,
       onCreateComment,
@@ -5418,10 +5472,12 @@ export function ReviewCodeView({
       }
 
       if (annotation.metadata.type === 'regional-replay') {
+        const regionalReplayAnnotation =
+          annotation as DiffLineAnnotation<RegionalReplayAnnotationMetadata>;
         return (
-          <RegionalReplayAnnotation
-            annotation={annotation as DiffLineAnnotation<RegionalReplayAnnotationMetadata>}
-          />
+          <div slot={getLineAnnotationName(regionalReplayAnnotation)}>
+            <RegionalReplayAnnotation annotation={regionalReplayAnnotation} />
+          </div>
         );
       }
 

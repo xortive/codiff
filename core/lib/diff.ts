@@ -164,6 +164,11 @@ export const getDiffLineCountFromVisibleSections = (
 
   for (const { fileDiff, section } of sections) {
     if (section.binary || (section.loadState != null && section.loadState !== 'ready')) {
+      if (!section.binary && section.lineCount) {
+        additions += section.lineCount.additions;
+        countable = true;
+        deletions += section.lineCount.deletions;
+      }
       continue;
     }
 

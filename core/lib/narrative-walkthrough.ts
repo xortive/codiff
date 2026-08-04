@@ -19,7 +19,6 @@ import {
 type NarrativeLineCount = {
   added: number;
   deleted: number;
-  diffAvailable?: false;
 };
 
 /** A normalized model stop with a global position in the walkthrough. */
@@ -29,8 +28,9 @@ export type WalkthroughStopView = WalkthroughModel['chapters'][number]['stops'][
 };
 
 export type WalkthroughUnitBoundary = {
-  commit: NonNullable<NonNullable<WalkthroughModel['units']>[number]['commit']>;
+  commit?: NonNullable<NonNullable<WalkthroughModel['units']>[number]['commit']>;
   identity: NonNullable<WalkthroughModel['units']>[number]['identity'];
+  kind?: NonNullable<WalkthroughModel['units']>[number]['kind'];
 };
 
 /** A chapter with indexed stops. */
@@ -60,8 +60,8 @@ export type WalkthroughFileList = {
 
 export type WalkthroughFileLineRow = {
   added: number;
+  available: boolean;
   deleted: number;
-  diffAvailable?: false;
   label: string;
   path?: string;
   title: string;
@@ -126,43 +126,37 @@ export const formatWalkthroughFileList = (
 };
 
 export const formatWalkthroughFileLineRows = (
-  items: ReadonlyArray<{
-    added: number;
-    deleted: number;
-    diffAvailable?: false;
-    path: string;
-  }>,
+  items: ReadonlyArray<{ added: number; available?: boolean; deleted: number; path: string }>,
   maxVisibleFiles = 5,
 ): ReadonlyArray<WalkthroughFileLineRow> => {
   const order: Array<string> = [];
-  const totalsByPath = new Map<string, NarrativeLineCount>();
+  const totalsByPath = new Map<string, NarrativeLineCount & { available: boolean }>();
   for (const item of items) {
     if (!totalsByPath.has(item.path)) {
       order.push(item.path);
-      totalsByPath.set(item.path, { added: 0, deleted: 0 });
+      totalsByPath.set(item.path, { added: 0, available: true, deleted: 0 });
     }
     const current = totalsByPath.get(item.path)!;
     totalsByPath.set(item.path, {
       added: current.added + item.added,
+      available: current.available && item.available !== false,
       deleted: current.deleted + item.deleted,
-      ...(current.diffAvailable === false || item.diffAvailable === false
-        ? { diffAvailable: false as const }
-        : {}),
     });
   }
 
   if (order.length === 0) {
-    return [{ added: 0, deleted: 0, label: '0 files', title: '' }];
+    return [{ added: 0, available: true, deleted: 0, label: '0 files', title: '' }];
   }
 
   if (order.length > maxVisibleFiles) {
     const totals = [...totalsByPath.values()].reduce(
-      (sum, item) => ({ added: sum.added + item.added, deleted: sum.deleted + item.deleted }),
-      { added: 0, deleted: 0 } as NarrativeLineCount,
+      (sum, item) => ({
+        added: sum.added + item.added,
+        available: sum.available && item.available,
+        deleted: sum.deleted + item.deleted,
+      }),
+      { added: 0, available: true, deleted: 0 },
     );
-    if ([...totalsByPath.values()].some((item) => item.diffAvailable === false)) {
-      totals.diffAvailable = false;
-    }
     return [
       {
         ...totals,
@@ -183,15 +177,15 @@ export const formatWalkthroughFileLineRows = (
 export const resolveWalkthroughFileLineItems = (
   hunks: ReadonlyArray<WalkthroughHunk>,
   files: ReadonlyArray<ChangedFile>,
-): ReadonlyArray<{ added: number; deleted: number; diffAvailable?: false; path: string }> =>
+): ReadonlyArray<{ added: number; available: boolean; deleted: number; path: string }> =>
   hunks.map((hunk) => {
     if (!isSyntheticWalkthroughHunk(hunk)) {
-      return { added: hunk.added, deleted: hunk.deleted, path: hunk.path };
+      return { added: hunk.added, available: true, deleted: hunk.deleted, path: hunk.path };
     }
 
     const resolved = resolveWalkthroughHunkFile(hunk, files);
     if (!resolved) {
-      return { added: 0, deleted: 0, diffAvailable: false, path: hunk.path };
+      return { added: 0, available: false, deleted: 0, path: hunk.path };
     }
     const { file, section } = resolved;
     const hasExactContents =
@@ -203,6 +197,7 @@ export const resolveWalkthroughFileLineItems = (
       if (lineCount.countable) {
         return {
           added: lineCount.additions,
+          available: true,
           deleted: lineCount.deletions,
           path: hunk.path,
         };
@@ -215,6 +210,7 @@ export const resolveWalkthroughFileLineItems = (
       if (materialized) {
         return {
           added: materialized.added,
+          available: true,
           deleted: materialized.deleted,
           path: hunk.path,
         };
@@ -223,13 +219,13 @@ export const resolveWalkthroughFileLineItems = (
     if (section.lineCount != null) {
       return {
         added: section.lineCount.additions,
+        available: true,
         deleted: section.lineCount.deletions,
         path: hunk.path,
       };
     }
-    return { added: 0, deleted: 0, diffAvailable: false, path: hunk.path };
+    return { added: 0, available: false, deleted: 0, path: hunk.path };
   });
-
 const walkthroughCoveredHunkIds = (view: WalkthroughView): ReadonlySet<string> =>
   new Set([...view.sequence, ...view.support].flatMap((item) => item.hunkIds));
 
@@ -331,13 +327,13 @@ export const getUncoveredWalkthroughFileLineItems = (
   files: ReadonlyArray<ChangedFile>,
   view: WalkthroughView,
   showWhitespace: boolean,
-): ReadonlyArray<{ added: number; deleted: number; diffAvailable?: false; path: string }> =>
+): ReadonlyArray<{ added: number; available: boolean; deleted: number; path: string }> =>
   getUncoveredWalkthroughFiles(files, view, showWhitespace).map((file) => {
     const lineCount = getDiffLineCount(file, showWhitespace);
     return {
       added: lineCount.countable ? lineCount.additions : 0,
+      available: lineCount.countable,
       deleted: lineCount.countable ? lineCount.deletions : 0,
-      ...(!lineCount.countable ? { diffAvailable: false as const } : {}),
       path: file.path,
     };
   });
@@ -348,7 +344,10 @@ export const isWalkthroughCommittable = (walkthrough: WalkthroughModel): boolean
 const groupSupportByReason = (
   support: ReadonlyArray<WalkthroughSupportGroup>,
 ): ReadonlyArray<WalkthroughSupportReason> => {
-  const groups: Array<{ files: Array<WalkthroughSupportGroup>; reason: string }> = [];
+  const groups: Array<{
+    files: Array<WalkthroughSupportGroup>;
+    reason: string;
+  }> = [];
   const byReason = new Map<string, { files: Array<WalkthroughSupportGroup>; reason: string }>();
   for (const item of support) {
     let group = byReason.get(item.reason);
@@ -371,10 +370,11 @@ export const buildWalkthroughView = (walkthrough: WalkthroughModel): Walkthrough
   const boundaryByChapterId = new Map<string, WalkthroughUnitBoundary>();
   for (const unit of walkthrough.units ?? []) {
     const firstChapterId = unit.chapterIds[0];
-    if (firstChapterId && unit.commit) {
+    if (firstChapterId) {
       boundaryByChapterId.set(firstChapterId, {
-        commit: unit.commit,
+        ...(unit.commit ? { commit: unit.commit } : {}),
         identity: unit.identity,
+        ...(unit.kind ? { kind: unit.kind } : {}),
       });
     }
   }

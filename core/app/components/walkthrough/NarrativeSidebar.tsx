@@ -12,9 +12,9 @@ import {
   type WalkthroughView,
   type WalkthroughStopView,
 } from '../../../lib/narrative-walkthrough.ts';
-import type { ChangedFile, WalkthroughModel } from '../../../types.ts';
+import type { ChangedFile, EvolutionUnitId, WalkthroughModel } from '../../../types.ts';
 import { CommitRefTooltip } from '../CommitRefTooltip.tsx';
-import { ChapterIcon } from './parts.tsx';
+import { ChapterIcon, EvolutionUnitPill } from './parts.tsx';
 import type { NarrativeNavigation } from './useNarrativeNavigation.ts';
 
 function TocFileRows({
@@ -22,8 +22,8 @@ function TocFileRows({
 }: {
   files: ReadonlyArray<{
     added: number;
+    available: boolean;
     deleted: number;
-    diffAvailable?: false;
     label: string;
     path?: string;
     title: string;
@@ -37,13 +37,13 @@ function TocFileRows({
             {file.label}
           </span>
           <span className="wt-toc-count">
-            {file.diffAvailable === false ? (
-              'Diff unavailable'
-            ) : (
+            {file.available ? (
               <>
                 <span className="added">+{file.added}</span>
                 {file.deleted > 0 ? <span className="deleted">−{file.deleted}</span> : null}
               </>
+            ) : (
+              <span>Diff unavailable</span>
             )}
           </span>
         </span>
@@ -166,6 +166,7 @@ export function NarrativeSidebar({
   allowCommit = true,
   files,
   navigation,
+  onRegenerateUnit,
   onShareWalkthrough,
   shareWalkthroughDisabled = false,
   showWhitespace,
@@ -174,6 +175,7 @@ export function NarrativeSidebar({
   allowCommit?: boolean;
   files: ReadonlyArray<ChangedFile>;
   navigation: NarrativeNavigation;
+  onRegenerateUnit?: (unitId: EvolutionUnitId) => void;
   onShareWalkthrough?: () => void;
   shareWalkthroughDisabled?: boolean;
   showWhitespace: boolean;
@@ -206,7 +208,39 @@ export function NarrativeSidebar({
               </span>
               <span className="wt-toc-chapter-title">{chapter.title}</span>
               {chapter.boundary ? (
-                <CommitRefTooltip className="wt-unit-commit-ref" commit={chapter.boundary.commit} />
+                <>
+                  {chapter.boundary.identity.kind === 'evolution-unit' ? (
+                    <EvolutionUnitPill
+                      kind={chapter.boundary.kind === 'commit' ? undefined : chapter.boundary.kind}
+                    />
+                  ) : null}
+                  {chapter.boundary.commit &&
+                  !(
+                    chapter.boundary.identity.kind === 'evolution-unit' &&
+                    chapter.boundary.kind === 'removed'
+                  ) ? (
+                    <CommitRefTooltip
+                      className="wt-unit-commit-ref"
+                      commit={chapter.boundary.commit}
+                    />
+                  ) : null}
+                  {chapter.boundary.identity.kind === 'evolution-unit' && onRegenerateUnit ? (
+                    <button
+                      aria-label="Regenerate Evolution Unit"
+                      className="wt-unit-regenerate"
+                      onClick={() => {
+                        const identity = chapter.boundary?.identity;
+                        if (identity?.kind === 'evolution-unit') {
+                          onRegenerateUnit(identity.unitId);
+                        }
+                      }}
+                      title="Regenerate this Evolution Unit"
+                      type="button"
+                    >
+                      ↻
+                    </button>
+                  ) : null}
+                </>
               ) : null}
             </div>
             <div className="wt-toc-stops">
