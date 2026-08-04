@@ -2,6 +2,7 @@ import type { NativeKeyboardLayout } from './config/keyboard-layout.ts';
 import type { CodiffConfig } from './config/types.ts';
 import type {
   AgentSkillStatus,
+  ChangedFile,
   CodiffFeatureFlags,
   CodiffLaunchOptions,
   CodiffMarkdownDocument,
@@ -28,6 +29,16 @@ import type {
   ReviewContextRequest,
   ReviewContextResult,
   ReviewSource,
+  ReviewVersionAggregateRequest,
+  ReviewVersionAggregateResult,
+  ReviewVersionCompareRequest,
+  ReviewVersionCompareResult,
+  ReviewVersionEvolutionRequest,
+  ReviewVersionEvolutionProgressEvent,
+  ReviewVersionEvolutionResult,
+  ReviewVersionsRequest,
+  ReviewVersionsResult,
+  ReviewVersionUnitDiffRequest,
   SaveMarkdownDocumentRequest,
   SaveMarkdownDocumentResult,
   SharePlanResult,
@@ -54,6 +65,7 @@ declare global {
       askReviewAssistant: (request: ReviewAssistantRequest) => Promise<ReviewAssistantResult>;
       cancelDiffContentRequest: (requestId: string) => void;
       cancelNarrativeWalkthrough: () => Promise<void>;
+      cancelReviewVersionEvolution: (requestId: string) => Promise<void>;
       completePlan: (review: PlanReview, status: PlanHandoffStatus) => Promise<void>;
       createWalkthroughCommit: (
         request: WalkthroughCommitRequest,
@@ -87,6 +99,19 @@ declare global {
         source: Extract<ReviewSource, { type: 'pull-request' }>,
         requestId?: string,
       ) => Promise<ReadonlyArray<PullRequestExistingReviewComment>>;
+      getReviewVersionAggregate: (
+        request: ReviewVersionAggregateRequest,
+      ) => Promise<ReviewVersionAggregateResult>;
+      getReviewVersionCompare: (
+        request: ReviewVersionCompareRequest,
+      ) => Promise<ReviewVersionCompareResult>;
+      getReviewVersionEvolution: (
+        request: ReviewVersionEvolutionRequest,
+      ) => Promise<ReviewVersionEvolutionResult>;
+      getReviewVersions: (request: ReviewVersionsRequest) => Promise<ReviewVersionsResult>;
+      getReviewVersionUnitDiff: (
+        request: ReviewVersionUnitDiffRequest,
+      ) => Promise<ReadonlyArray<ChangedFile>>;
       getTerminalHelperStatus: () => Promise<TerminalHelperStatus>;
       getUpdateStatus: () => Promise<CodiffUpdateStatus>;
       increaseCodeFontSize: () => Promise<void>;
@@ -113,6 +138,9 @@ declare global {
       onRefreshRequest: (callback: () => void) => () => void;
       onRepositoryChanged: (callback: (change: { root: string }) => void) => () => void;
       onUpdateStatusChanged: (callback: (status: CodiffUpdateStatus) => void) => () => void;
+      onReviewVersionEvolutionProgress: (
+        callback: (event: ReviewVersionEvolutionProgressEvent) => void,
+      ) => () => void;
       onWalkthroughCommitOutput: (callback: (chunk: string) => void) => () => void;
       onWalkthroughProgress: (callback: (progress: WalkthroughProgressEvent) => void) => () => void;
       onWindowFullScreenChanged: (callback: (isFullScreen: boolean) => void) => () => void;
