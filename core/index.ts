@@ -17,7 +17,17 @@ export {
   type ProviderCommentTargetResolution,
   type ShareCommentTargetResolution,
 } from './lib/review-comment-target.ts';
-export { diffRange, isCommitRevision, shaForRevision } from './lib/review-history.ts';
+export {
+  commitRevisionLabel,
+  diffComparison,
+  diffRange,
+  indexRevision,
+  isCommitRevision,
+  revisionRef,
+  shaForRevision,
+  versionRevisionLabel,
+  workingCopyRevision,
+} from './lib/review-history.ts';
 export {
   orderReviewCommitStack,
   validateReviewCommitStack,
@@ -125,7 +135,9 @@ export type {
   CodiffFeatureFlags,
   CodiffPreferences,
   DiffRange,
+  DiffComparison,
   DiffSection,
+  EvolutionUnitId,
   GenerationMetadata,
   GenerationProfile,
   GenerationSettings,
@@ -154,6 +166,7 @@ export type {
   ReviewCommitSummary,
   ReviewPreferences,
   ResolvedReviewSource,
+  ReviewVersionId,
   RepositoryState,
   Revision,
   RevisionLabel,
