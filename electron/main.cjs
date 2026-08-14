@@ -111,6 +111,7 @@ const {
 } = require('./markdown-document.cjs');
 const {
   createRepositoryWatcherCoordinator,
+  getRepositoryWatcherInitialSnapshot,
   readRepositoryWatcherSnapshot,
 } = require('./repository-watcher.cjs');
 const { getPlanReviewPath, readPlanReview, writePlanReview } = require('./plan-review.cjs');
@@ -222,19 +223,20 @@ const runDiffContentRequest = async (event, request, read) => {
   }
 };
 
-/** @param {string} repositoryPath @param {ReviewSource} [source] */
-const readRepositoryStateWithConfig = (repositoryPath, source) =>
+/** @param {string} repositoryPath @param {ReviewSource} [source] @param {string} [repositoryRoot] */
+const readRepositoryStateWithConfig = (repositoryPath, source, repositoryRoot) =>
   readRepositoryState(repositoryPath, source, {
+    repositoryRoot,
     showWhitespace: config.settings.showWhitespace,
   });
 
-/** @param {string} repositoryPath @param {CodiffLaunchOptions} launchOptions */
-const readInitialRepositoryStateWithConfig = (repositoryPath, launchOptions) =>
+/** @param {string} repositoryPath @param {CodiffLaunchOptions} launchOptions @param {string} [repositoryRoot] */
+const readInitialRepositoryStateWithConfig = (repositoryPath, launchOptions, repositoryRoot) =>
   launchOptions.walkthrough && !launchOptions.walkthroughFile
     ? readWalkthroughRepositoryState(repositoryPath, launchOptions.source, {
         showWhitespace: config.settings.showWhitespace,
       })
-    : readRepositoryStateWithConfig(repositoryPath, launchOptions.source);
+    : readRepositoryStateWithConfig(repositoryPath, launchOptions.source, repositoryRoot);
 
 /** @param {number} webContentsId */
 const resolveWindowAgent = (webContentsId) => {
@@ -535,8 +537,12 @@ const beginRepositorySelfWrite = (webContentsId, path) =>
 const finishRepositorySelfWrite = (token, version) =>
   repositoryWatcherCoordinator.finishWrite(token, version);
 
-/** @param {import('electron').BrowserWindow} browserWindow @param {string} repositoryPath */
-const startRepositoryWatcher = (browserWindow, repositoryPath) => {
+/**
+ * @param {import('electron').BrowserWindow} browserWindow
+ * @param {string} repositoryPath
+ * @param {Promise<{head: string; pathSignatures: Record<string, string>; pathVersions: Record<string, string>; root: string; signature: string}> | undefined} initialSnapshot
+ */
+const startRepositoryWatcher = (browserWindow, repositoryPath, initialSnapshot) => {
   const webContentsId = browserWindow.webContents.id;
   void repositoryWatcherCoordinator.attach({
     getState: () => ({
@@ -545,6 +551,7 @@ const startRepositoryWatcher = (browserWindow, repositoryPath) => {
         !browserWindow.isDestroyed() && browserWindow.isVisible() && !browserWindow.isMinimized(),
     }),
     id: webContentsId,
+    initialSnapshot,
     notify: (root) => {
       if (!browserWindow.isDestroyed()) {
         browserWindow.webContents.send('codiff:repositoryChanged', { root });
@@ -957,7 +964,7 @@ const createWindow = (
   windowLaunchOptions.set(webContentsId, launchOptions);
   const initialRepositoryStatePromise = launchOptions.planFile
     ? null
-    : readInitialRepositoryStateWithConfig(repositoryPath, launchOptions);
+    : readInitialRepositoryStateWithConfig(repositoryPath, launchOptions, identity?.repositoryRoot);
   const initialRepositoryState = initialRepositoryStatePromise?.then((state) => {
     if (!window.isDestroyed()) {
       storeResolvedRepositoryState(webContentsId, state);
@@ -980,7 +987,7 @@ const createWindow = (
           (state.source.type === 'working-tree' || state.source.type === 'branch-working-tree') &&
           !window.isDestroyed()
         ) {
-          startRepositoryWatcher(window, state.root);
+          startRepositoryWatcher(window, state.root, getRepositoryWatcherInitialSnapshot(state));
         }
       })
       .catch(() => {});
@@ -1220,7 +1227,11 @@ const focusOrCreateWindow = (
       } else {
         windowInitialRepositoryStates.set(
           matchingWebContentsId,
-          readInitialRepositoryStateWithConfig(repositoryPath, launchOptions),
+          readInitialRepositoryStateWithConfig(
+            repositoryPath,
+            launchOptions,
+            identity?.repositoryRoot,
+          ),
         );
       }
       if (identity) {
