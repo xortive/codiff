@@ -1,9 +1,20 @@
-import { useCallback, useState, type RefObject } from 'react';
-import type { ReviewComment } from '../../lib/app-types.ts';
+import { useCallback, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
+import type {
+  LocalReviewNote,
+  ProviderCommentDraft,
+  ReviewComment,
+  ReviewDraft,
+} from '../../lib/app-types.ts';
 import {
   getPendingPullRequestReviewComments,
   getReviewCommentRangeProps,
-  toPullRequestReviewComment,
+  isLocalReviewNote,
+  isProviderCommentDraft,
+  isProviderInlineComment,
+  isReviewDraft,
+  toProviderCommentSubmission,
+  toProviderSubmittedReviewComment,
+  toRenderedSubmittedReviewComment,
 } from '../../lib/review-comments.ts';
 import type {
   PullRequestReviewEvent,
@@ -14,6 +25,8 @@ import type {
 import { useReviewCommentDrafts } from './useReviewCommentDrafts.ts';
 
 type UseAppReviewCommentsOptions = {
+  draftKind: ReviewDraft['kind'];
+  initialReviewComments?: ReadonlyArray<ReviewComment>;
   isReviewActionDisabled: (
     reviewStatus: PullRequestReviewStatus | undefined,
     event: PullRequestReviewEvent,
@@ -23,15 +36,19 @@ type UseAppReviewCommentsOptions = {
 };
 
 export function useAppReviewComments({
+  draftKind,
+  initialReviewComments = [],
   isReviewActionDisabled,
   onCommentFileChange,
   stateRef,
 }: UseAppReviewCommentsOptions) {
-  const [reviewComments, setReviewComments] = useState<ReadonlyArray<ReviewComment>>([]);
+  const [reviewComments, setReviewComments] =
+    useState<ReadonlyArray<ReviewComment>>(initialReviewComments);
   const [pullRequestReviewSubmitting, setPullRequestReviewSubmitting] =
     useState<PullRequestReviewEvent | null>(null);
   const commentDrafts = useReviewCommentDrafts({
     comments: reviewComments,
+    draftKind,
     onCommentFileChange,
     setComments: setReviewComments,
   });
@@ -44,10 +61,10 @@ export function useAppReviewComments({
   } = commentDrafts;
 
   const updateCodexReply = useCallback(
-    (commentId: string, filePath: string, codexReply: NonNullable<ReviewComment['codexReply']>) => {
+    (commentId: string, filePath: string, codexReply: NonNullable<ReviewDraft['codexReply']>) => {
       setReviewComments((current) =>
         current.map((comment) =>
-          comment.id === commentId
+          comment.id === commentId && isReviewDraft(comment)
             ? {
                 ...comment,
                 codexReply,
@@ -61,10 +78,10 @@ export function useAppReviewComments({
   );
 
   const updateRemoteSubmit = useCallback(
-    (commentId: string, remoteSubmit: ReviewComment['remoteSubmit']) => {
+    (commentId: string, remoteSubmit: ProviderCommentDraft['remoteSubmit']) => {
       setReviewComments((current) =>
         current.map((comment) =>
-          comment.id === commentId
+          comment.id === commentId && isProviderCommentDraft(comment)
             ? {
                 ...comment,
                 remoteSubmit,
@@ -81,12 +98,10 @@ export function useAppReviewComments({
   );
 
   const askCodex = useCallback(
-    (commentId: string) => {
+    (comment: ReviewDraft) => {
       const currentState = stateRef.current;
-      const comment = reviewCommentsRef.current.find((candidate) => candidate.id === commentId);
       if (
         !currentState ||
-        !comment ||
         comment.body.trim().length === 0 ||
         comment.codexReply?.status === 'loading'
       ) {
@@ -130,27 +145,41 @@ export function useAppReviewComments({
           });
         });
     },
-    [reviewCommentsRef, stateRef, updateCodexReply],
+    [stateRef, updateCodexReply],
   );
 
   const submitPullRequestComment = useCallback(
     (commentId: string) => {
       const currentState = stateRef.current;
-      const comment = reviewCommentsRef.current.find((candidate) => candidate.id === commentId);
+      const comment = reviewCommentsRef.current.find(
+        (candidate): candidate is ProviderCommentDraft =>
+          candidate.id === commentId && isProviderCommentDraft(candidate),
+      );
       if (
         currentState?.source.type !== 'pull-request' ||
         !comment ||
         comment.body.trim().length === 0 ||
-        comment.remoteSubmit?.status === 'submitting'
+        comment.remoteSubmit?.status === 'submitting' ||
+        comment.remoteSubmit?.status === 'outcome-unknown'
       ) {
         return;
       }
 
       updateRemoteSubmit(comment.id, { status: 'submitting' });
       updateActiveReviewCommentDraft(null);
+      let submission;
+      try {
+        submission = toProviderCommentSubmission(comment);
+      } catch (error: unknown) {
+        updateRemoteSubmit(comment.id, {
+          error: error instanceof Error ? error.message : String(error),
+          status: 'error',
+        });
+        return;
+      }
       void window.codiff
         .submitPullRequestComment({
-          comment: toPullRequestReviewComment(comment),
+          comment: submission,
           source: currentState.source,
         })
         .then((submittedComment) => {
@@ -158,22 +187,10 @@ export function useAppReviewComments({
           setReviewComments((current) =>
             current.map((candidate) =>
               candidate.id === comment.id
-                ? {
-                    author: submittedComment.author,
-                    body: submittedComment.body,
-                    filePath: submittedComment.filePath,
-                    id: submittedComment.id,
-                    isReadOnly: true,
-                    ...(submittedComment.anchor === 'file' ? { anchor: 'file' as const } : {}),
-                    ...(submittedComment.lineNumber != null
-                      ? { lineNumber: submittedComment.lineNumber }
-                      : {}),
-                    sectionId: comment.sectionId,
-                    ...(submittedComment.side ? { side: submittedComment.side } : {}),
-                    ...getReviewCommentRangeProps(submittedComment),
-                    submittedAt: submittedComment.submittedAt,
-                    url: submittedComment.url,
-                  }
+                ? toRenderedSubmittedReviewComment(
+                    toProviderSubmittedReviewComment(submittedComment, submission),
+                    comment,
+                  )
                 : candidate,
             ),
           );
@@ -198,36 +215,67 @@ export function useAppReviewComments({
 
   const submitPullRequestReview = useCallback(
     (event: PullRequestReviewEvent, body?: string) => {
-      const currentState = stateRef.current;
+      const source = stateRef.current?.source;
       if (
-        currentState?.source.type !== 'pull-request' ||
+        source?.type !== 'pull-request' ||
         pullRequestReviewSubmitting ||
-        isReviewActionDisabled(currentState.source.reviewStatus, event)
+        isReviewActionDisabled(source.reviewStatus, event)
       ) {
         return;
       }
 
       const pendingComments = getPendingPullRequestReviewComments(
-        reviewCommentsRef.current,
+        reviewCommentsRef.current.filter(isProviderCommentDraft),
         activeReviewCommentDraftRef.current,
       );
       if (event === 'COMMENT' && pendingComments.length === 0 && !body?.trim()) {
         return;
       }
-      const pendingCommentIds = new Set(pendingComments.map((comment) => comment.id));
+      let formattedComments;
+      try {
+        formattedComments = pendingComments.map((comment) => toProviderCommentSubmission(comment));
+      } catch (error) {
+        return Promise.reject(error);
+      }
       setPullRequestReviewSubmitting(event);
-      return window.codiff
-        .submitPullRequestReview({
-          ...(body ? { body } : {}),
-          comments: pendingComments.map((comment) => toPullRequestReviewComment(comment)),
-          event,
-          source: currentState.source,
-        })
-        .then(() => {
-          updateActiveReviewCommentDraft(null);
-          setReviewComments((current) =>
-            current.filter((comment) => !pendingCommentIds.has(comment.id)),
+      return Promise.resolve()
+        .then(() =>
+          window.codiff.submitPullRequestReview({
+            ...(body ? { body } : {}),
+            comments: formattedComments,
+            event,
+            source,
+          }),
+        )
+        .then((result) => {
+          const submittedDraftIds = new Set(result.submittedDraftIds);
+          const outcomeUnknownDraftIds = new Set(
+            result.status === 'failed' ? (result.outcomeUnknownDraftIds ?? []) : [],
           );
+          if (
+            activeReviewCommentDraftRef.current &&
+            submittedDraftIds.has(activeReviewCommentDraftRef.current.id)
+          ) {
+            updateActiveReviewCommentDraft(null);
+          }
+          setReviewComments((current) =>
+            current
+              .filter((comment) => !submittedDraftIds.has(comment.id))
+              .map((comment) =>
+                outcomeUnknownDraftIds.has(comment.id) && isProviderCommentDraft(comment)
+                  ? {
+                      ...comment,
+                      remoteSubmit: {
+                        error: 'Provider outcome is unknown. Refresh and inspect before retrying.',
+                        status: 'outcome-unknown' as const,
+                      },
+                    }
+                  : comment,
+              ),
+          );
+          if (result.status === 'failed') {
+            throw new Error(result.reason);
+          }
         })
         .catch((error: unknown) => {
           window.alert(error instanceof Error ? error.message : String(error));
@@ -247,15 +295,42 @@ export function useAppReviewComments({
     ],
   );
 
+  const localReviewNotes = reviewComments.filter(isLocalReviewNote);
+  const providerDrafts = reviewComments.filter(isProviderCommentDraft);
+  const providerInlineComments = reviewComments.filter(isProviderInlineComment);
+  const setLocalReviewNotes = useCallback<Dispatch<SetStateAction<ReadonlyArray<LocalReviewNote>>>>(
+    (update) => {
+      setReviewComments((current) => {
+        const currentNotes = current.filter(isLocalReviewNote);
+        const nextNotes = typeof update === 'function' ? update(currentNotes) : update;
+        return [...current.filter((comment) => !isLocalReviewNote(comment)), ...nextNotes];
+      });
+    },
+    [],
+  );
+  const setProviderDrafts = useCallback<
+    Dispatch<SetStateAction<ReadonlyArray<ProviderCommentDraft>>>
+  >((update) => {
+    setReviewComments((current) => {
+      const currentDrafts = current.filter(isProviderCommentDraft);
+      const nextDrafts = typeof update === 'function' ? update(currentDrafts) : update;
+      return [...current.filter((comment) => !isProviderCommentDraft(comment)), ...nextDrafts];
+    });
+  }, []);
   const hasPendingReviewComments =
-    getPendingPullRequestReviewComments(reviewComments, activeReviewCommentDraftState).length > 0;
+    getPendingPullRequestReviewComments(providerDrafts, activeReviewCommentDraftState).length > 0;
 
   return {
     ...commentDrafts,
     askCodex,
     hasPendingReviewComments,
+    localReviewNotes,
+    providerDrafts,
+    providerInlineComments,
     pullRequestReviewSubmitting,
     reviewComments,
+    setLocalReviewNotes,
+    setProviderDrafts,
     setReviewComments,
     submitPullRequestComment,
     submitPullRequestReview,

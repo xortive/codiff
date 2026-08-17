@@ -6,7 +6,8 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { expect, test, vi } from 'vite-plus/test';
 import { ReviewTopBar } from '../app/components/ReviewTopBar.tsx';
-import { ReviewSurface, type ReviewCommenting } from '../SharedWalkthroughApp.tsx';
+import { createDefaultConfig } from '../config/defaults.ts';
+import { ReviewSurface } from '../SharedWalkthroughApp.tsx';
 import type { NarrativeWalkthrough, SharedWalkthroughSnapshot } from '../types.ts';
 import { createChangedFile } from './helpers/fixtures.ts';
 import { waitFor } from './helpers/react.tsx';
@@ -20,6 +21,7 @@ reactActEnvironment.ResizeObserver ??= class ResizeObserver {
   unobserve() {}
 };
 HTMLElement.prototype.scrollBy ??= function scrollBy() {};
+HTMLElement.prototype.scrollIntoView ??= function scrollIntoView() {};
 HTMLElement.prototype.scrollTo ??= function scrollTo() {};
 
 const createMarkdownFile = (path = 'README.md') =>
@@ -57,13 +59,10 @@ const commenting = {
   onReplyGeneralComment: async () => {},
   onResolveDiscussion: async () => {},
   onSignIn: () => {},
-  onSubmitComment: async () => {
-    throw new Error('Not used by this test.');
-  },
   onSubmitGeneralComment: async () => {},
   onUpdateComment: async () => {},
   onUpdateGeneralComment: async () => {},
-} satisfies ReviewCommenting;
+};
 
 test('review top bar renders its leading control at the far left', async () => {
   const container = document.createElement('div');
@@ -114,43 +113,265 @@ test('share viewer shows the complete repository path when there is no repositor
       wordWrap: false,
     },
     repository: { root: '/Users/ada/dev/codiff-web', source },
+    reviewComments: [],
     version: 1,
     walkthrough: {
       agent: 'codex',
       chapters: [],
-      focus: 'Focus on the implementation.',
+      focus: 'Review the change.',
       generatedAt: '2026-06-19T00:00:00.000Z',
       kind: 'narrative',
       repo: { branch: 'main', root: '/Users/ada/dev/codiff-web' },
       source,
       support: [],
-      title: 'Shared walkthrough',
+      title: 'Review',
       version: 4,
     },
   } satisfies SharedWalkthroughSnapshot;
-
+  const originalHome = process.env.HOME;
+  process.env.HOME = '/Users/ada';
   const container = document.createElement('div');
   document.body.append(container);
-  let root: Root | null = null;
-  await using _resource = {
-    async [Symbol.asyncDispose]() {
-      if (root) {
-        await act(async () => root?.unmount());
-      }
-      container.remove();
-    },
-  };
-  await act(async () => {
-    root = createRoot(container);
-    root.render(<ReviewSurface snapshot={snapshot} title="Review shared walkthrough" />);
-  });
+  let root!: Root;
 
-  await waitFor(() => {
-    expect(container.querySelector('.review-top-bar-repository')).not.toBeNull();
-  });
-  expect(container.querySelector('.review-top-bar-repository')?.textContent).toBe(
-    '~/dev/codiff-web',
-  );
+  try {
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<ReviewSurface snapshot={snapshot} title="Review shared walkthrough" />);
+    });
+    await waitFor(() => {
+      expect(container.querySelector('.review-top-bar-repository')).not.toBeNull();
+    });
+    expect(container.querySelector('.review-top-bar-repository')?.textContent).toBe(
+      '~/dev/codiff-web',
+    );
+  } finally {
+    if (originalHome == null) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test('shared review surface owns configured search and portable commands', async () => {
+  const file = createChangedFile('src/shared-command.ts');
+  const snapshot = {
+    branch: 'main',
+    codiffVersion: 'test',
+    exportedAt: '2026-07-29T00:00:00.000Z',
+    files: [file],
+    kind: 'codiff-walkthrough-share',
+    preferences: {
+      codeFontFamily: 'Fira Code',
+      codeFontSize: 13,
+      diffStyle: 'split',
+      showWhitespace: false,
+      theme: 'system',
+      wordWrap: false,
+    },
+    repository: { root: '/repo', source: { type: 'working-tree' } },
+    version: 1,
+    walkthrough: {
+      agent: 'codex',
+      chapters: [],
+      focus: 'Review the change.',
+      generatedAt: '2026-07-29T00:00:00.000Z',
+      kind: 'narrative',
+      repo: { branch: 'main', root: '/repo' },
+      source: { type: 'working-tree' },
+      support: [],
+      title: 'Review',
+      version: 4,
+    },
+  } satisfies SharedWalkthroughSnapshot;
+  const keymap = {
+    ...createDefaultConfig().keymap,
+    commandBar: 'Ctrl+p',
+    diffSearch: 'Ctrl+g',
+  };
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+
+  try {
+    await act(async () => {
+      root.render(<ReviewSurface initialMode="tree" keymap={keymap} snapshot={snapshot} />);
+    });
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { bubbles: true, ctrlKey: true, key: 'g' }),
+      );
+    });
+    expect(container.querySelector('.diff-search-panel.visible')).not.toBeNull();
+
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { bubbles: true, ctrlKey: true, key: 'p' }),
+      );
+    });
+    const commandBar = container.querySelector('.command-bar');
+    expect(commandBar?.textContent).toContain('Find in Diffs');
+    expect(commandBar?.textContent).not.toContain('Open File in Editor');
+    expect(commandBar?.textContent).not.toContain('Open Config File');
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test('review threads expose provider provenance and code status navigates to the current diff', async () => {
+  const firstFile = createChangedFile('src/first.ts');
+  const file = createChangedFile('src/thread.ts');
+  const scrollIntoView = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
+  const source = {
+    number: 31,
+    projectPath: 'example-org/example-repo',
+    provider: 'gitlab',
+    type: 'pull-request',
+    url: 'https://gitlab.example.com/example-org/example-repo/-/merge_requests/31',
+  } as const;
+  const snapshot = {
+    branch: 'feature',
+    codiffVersion: 'test',
+    exportedAt: '2026-07-29T00:00:00.000Z',
+    files: [firstFile, file],
+    kind: 'codiff-walkthrough-share',
+    preferences: {
+      codeFontFamily: 'Fira Code',
+      codeFontSize: 13,
+      diffStyle: 'split',
+      showWhitespace: false,
+      theme: 'system',
+      wordWrap: false,
+    },
+    repository: {
+      generalComments: [
+        {
+          comments: [
+            {
+              author: {
+                login: 'overview-reviewer',
+                name: 'Overview Reviewer',
+                url: 'https://gitlab.example.com/overview-reviewer',
+              },
+              body: 'Overview feedback.',
+              id: 'overview-comment',
+              submittedAt: '2026-07-29T00:00:00.000Z',
+              url: `${source.url}#note_1`,
+            },
+          ],
+          id: 'overview-thread',
+        },
+      ],
+      root: '/repo',
+      source,
+    },
+    reviewComments: [
+      {
+        author: {
+          login: 'code-reviewer',
+          name: 'Code Reviewer',
+          url: 'https://gitlab.example.com/code-reviewer',
+        },
+        body: 'This line changed later.',
+        filePath: file.path,
+        id: 'outdated-comment',
+        isOutdated: true,
+        lineNumber: 1,
+        sectionId: file.sections[0]!.id,
+        side: 'additions' as const,
+        submittedAt: '2026-07-29T00:01:00.000Z',
+        url: `${source.url}#note_2`,
+      },
+    ],
+    version: 1,
+    walkthrough: {
+      agent: 'codex',
+      chapters: [],
+      focus: 'Review the change.',
+      generatedAt: '2026-07-29T00:00:00.000Z',
+      kind: 'narrative',
+      repo: { branch: 'feature', root: '/repo' },
+      source,
+      support: [],
+      title: 'Review',
+      version: 4,
+    },
+  } satisfies SharedWalkthroughSnapshot;
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+
+  try {
+    await act(async () => {
+      root.render(
+        <ReviewSurface
+          capabilities={{
+            comments: {
+              anchorPolicy: 'provider-target',
+              authoring: {},
+              destination: 'provider',
+              inline: {},
+            },
+            desktop: { collapsed: new Set([file.path]) },
+          }}
+          initialMode="comments"
+          providerLabel="GitLab"
+          snapshot={snapshot}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain('Overview comments');
+    expect(container.textContent).toContain('Inline review comments');
+    expect(
+      [...container.querySelectorAll('[role="tab"]')]
+        .find((tab) => tab.textContent?.includes('Comments'))
+        ?.getAttribute('aria-label'),
+    ).toBe('Comments (2)');
+    expect(
+      container.querySelector(`a[href="https://gitlab.example.com/overview-reviewer"]`),
+    ).not.toBeNull();
+    const overviewPermalink = container.querySelector<HTMLAnchorElement>(
+      `a[href="${source.url}#note_1"]`,
+    );
+    expect(overviewPermalink?.textContent).toContain('View on GitLab');
+
+    const outdatedStatus = [...container.querySelectorAll('span')].find(
+      ({ textContent }) => textContent === 'Outdated',
+    );
+    expect(outdatedStatus?.getAttribute('role')).toBeNull();
+    const inlineEntry = [
+      ...container.querySelectorAll<HTMLButtonElement>('.sidebar-comment-entry'),
+    ].find((entry) => entry.title === 'This line changed later.');
+    expect(inlineEntry).not.toBeUndefined();
+    await act(async () => inlineEntry?.click());
+    await waitFor(() => expect(container.querySelector('.file-tree-shell')).not.toBeNull());
+    await waitFor(() =>
+      expect(
+        container.querySelector('.codiff-file-header.selected .codiff-file-path')?.textContent,
+      ).toBe(file.path),
+    );
+    const targetHeader = [...container.querySelectorAll<HTMLElement>('.codiff-file-header')].find(
+      (header) => header.textContent?.includes(file.path),
+    );
+    expect(
+      targetHeader
+        ?.querySelector<HTMLElement>('.codiff-header-toggle')
+        ?.getAttribute('aria-expanded'),
+    ).toBe('true');
+    await waitFor(() =>
+      expect(document.activeElement?.classList.contains('review-comment-thread')).toBe(true),
+    );
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
+  } finally {
+    scrollIntoView.mockRestore();
+    await act(async () => root.unmount());
+    container.remove();
+  }
 });
 
 test('shared walkthroughs switch between walkthrough and tree review modes', async () => {
@@ -247,7 +468,26 @@ test('shared walkthroughs switch between walkthrough and tree review modes', asy
     root = createRoot(container);
     root.render(
       <ReviewSurface
-        commenting={commenting}
+        capabilities={{
+          comments: {
+            anchorPolicy: 'share-snapshot',
+            authoring: { canCreateInline: false },
+            destination: 'share',
+            general: {
+              onCreate: commenting.onSubmitGeneralComment,
+              onDelete: commenting.onDeleteGeneralComment,
+              onReply: commenting.onReplyGeneralComment,
+              onResolve: commenting.onResolveDiscussion,
+              onUpdate: commenting.onUpdateGeneralComment,
+            },
+            inline: {
+              onDelete: commenting.onDeleteComment,
+              onResolve: commenting.onResolveDiscussion,
+              onUpdate: commenting.onUpdateComment,
+            },
+            onSignIn: commenting.onSignIn,
+          },
+        }}
         onDeleteShare={onDeleteShare}
         providerLabel="GitLab"
         repositoryUrl="/cloudflare/voidzero/codiff-web"
@@ -259,6 +499,12 @@ test('shared walkthroughs switch between walkthrough and tree review modes', asy
   await waitFor(() => {
     expect(container.querySelector('.walkthrough-list')).not.toBeNull();
   });
+  const walkthroughArc = container.querySelector('.wt-arc');
+  const walkthroughBody = container.querySelector('.wt-hybrid');
+  expect(walkthroughArc).not.toBeNull();
+  expect(walkthroughBody).not.toBeNull();
+  expect(walkthroughBody?.contains(walkthroughArc)).toBe(false);
+  expect(walkthroughArc?.parentElement).toBe(walkthroughBody?.parentElement);
   const searchInput = container.querySelector<HTMLInputElement>('.sidebar-search');
   expect(searchInput).not.toBeNull();
   const deleteShare = container.querySelector<HTMLButtonElement>(

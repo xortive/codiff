@@ -19,8 +19,11 @@ import type {
   PlanReview,
   RepositoryHistory,
   RepositoryState,
+  ResolvedReviewSource,
   ReviewAssistantRequest,
   ReviewAssistantResult,
+  ReviewContextRequest,
+  ReviewContextResult,
   ReviewSource,
   SaveMarkdownDocumentRequest,
   SaveMarkdownDocumentResult,
@@ -30,6 +33,7 @@ import type {
   SubmitPullRequestCommentRequest,
   PullRequestExistingReviewComment,
   SubmitPullRequestReviewRequest,
+  SubmitPullRequestReviewResult,
   TerminalHelperStatus,
   WalkthroughCommitMessageRequest,
   WalkthroughCommitMessageResult,
@@ -45,6 +49,8 @@ declare global {
     codiff: {
       applyUpdate: () => Promise<CodiffUpdateStatus>;
       askReviewAssistant: (request: ReviewAssistantRequest) => Promise<ReviewAssistantResult>;
+      cancelDiffContentRequest: (requestId: string) => void;
+      cancelNarrativeWalkthrough: () => Promise<void>;
       completePlan: (review: PlanReview, status: PlanHandoffStatus) => Promise<void>;
       createWalkthroughCommit: (
         request: WalkthroughCommitRequest,
@@ -64,13 +70,17 @@ declare global {
         path: string;
       }) => Promise<CodiffMarkdownDocument>;
       getNarrativeWalkthrough: (
-        source?: ReviewSource,
+        source?: ResolvedReviewSource,
         options?: NarrativeWalkthroughRequestOptions,
       ) => Promise<NarrativeWalkthroughResult>;
       getPlanReview: () => Promise<PlanReview | null>;
       getPreferences: () => Promise<CodiffPreferences>;
       getRepositoryHistory: (limit?: number, source?: ReviewSource) => Promise<RepositoryHistory>;
       getRepositoryState: (source?: ReviewSource) => Promise<RepositoryState>;
+      getReviewComments: (
+        source: Extract<ReviewSource, { type: 'pull-request' }>,
+        requestId?: string,
+      ) => Promise<ReadonlyArray<PullRequestExistingReviewComment>>;
       getTerminalHelperStatus: () => Promise<TerminalHelperStatus>;
       getUpdateStatus: () => Promise<CodiffUpdateStatus>;
       increaseCodeFontSize: () => Promise<void>;
@@ -101,8 +111,15 @@ declare global {
       openFile: (path: string) => Promise<void>;
       openReleasePage: () => Promise<void>;
       openRepositoryFolder: () => Promise<void>;
+      reportInitialLoadMilestone: (
+        name: 'deferred-review-data-complete' | 'first-usable-review-rendered',
+      ) => void;
       resetCodeFontSize: () => Promise<void>;
       resolvePullRequestUrl: (value: string) => Promise<string>;
+      resolveReviewContext: (
+        request: ReviewContextRequest,
+        requestId?: string,
+      ) => Promise<ReviewContextResult>;
       saveMarkdownDocument: (
         request: SaveMarkdownDocumentRequest,
       ) => Promise<SaveMarkdownDocumentResult>;
@@ -116,7 +133,9 @@ declare global {
       submitPullRequestComment: (
         request: SubmitPullRequestCommentRequest,
       ) => Promise<PullRequestExistingReviewComment>;
-      submitPullRequestReview: (request: SubmitPullRequestReviewRequest) => Promise<void>;
+      submitPullRequestReview: (
+        request: SubmitPullRequestReviewRequest,
+      ) => Promise<SubmitPullRequestReviewResult>;
       updateWalkthroughCommitMessage: (
         request: WalkthroughCommitMessageRequest,
       ) => Promise<WalkthroughCommitMessageResult>;

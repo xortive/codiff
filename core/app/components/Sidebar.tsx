@@ -15,7 +15,13 @@ import {
 } from '../../lib/diff.ts';
 import { isNativeInputTarget } from '../../lib/keyboard.ts';
 import { getShortRef, getSourceKey } from '../../lib/source.ts';
-import type { ChangedFile, HistoryEntry, NarrativeWalkthrough, ReviewSource } from '../../types.ts';
+import type {
+  ChangedFile,
+  HistoryEntry,
+  NarrativeWalkthrough,
+  ResolvedReviewSource,
+  ReviewSource,
+} from '../../types.ts';
 import { Avatar } from './Avatar.tsx';
 import { Button } from './Button.tsx';
 import { ReviewFileTree } from './FileTree.tsx';
@@ -56,10 +62,10 @@ export function Sidebar({
   walkthroughLoading,
   walkthroughProgress,
 }: {
-  branchSource: Extract<ReviewSource, { type: 'branch-diff' }> | null;
+  branchSource: Extract<ResolvedReviewSource, { type: 'branch-diff' }> | null;
   commitFiles: ReadonlyArray<ChangedFile>;
   commitViewOpen: boolean;
-  currentSource: ReviewSource;
+  currentSource: ResolvedReviewSource | ReviewSource;
   files: ReadonlyArray<ChangedFile>;
   historyEntries: ReadonlyArray<HistoryEntry>;
   historyHasMore: boolean;
@@ -86,6 +92,7 @@ export function Sidebar({
   walkthroughError: WalkthroughError | null;
   walkthroughLoading: boolean;
   walkthroughProgress: {
+    generation: import('../../types.ts').WalkthroughGenerationProgress | null;
     phase: import('../../types.ts').WalkthroughProgressPhase | null;
     responseLabelIndex: number;
     stageRevision: number;
@@ -161,6 +168,7 @@ export function Sidebar({
               <div className="sidebar-walkthrough-status codex">
                 <WalkthroughProgress
                   phase={walkthroughProgress.phase}
+                  progress={walkthroughProgress.generation}
                   responseLabelIndex={walkthroughProgress.responseLabelIndex}
                   stageRevision={walkthroughProgress.stageRevision}
                 />
@@ -238,7 +246,7 @@ const shortDate = (timestamp: number) => {
   return `${Math.floor(months / 12)}y ago`;
 };
 
-function HistorySidebar({
+export function HistorySidebar({
   branchSource,
   currentSource,
   entries,
@@ -249,8 +257,8 @@ function HistorySidebar({
   pullRequestSource,
   searchQuery,
 }: {
-  branchSource: Extract<ReviewSource, { type: 'branch-diff' }> | null;
-  currentSource: ReviewSource;
+  branchSource: Extract<ResolvedReviewSource, { type: 'branch-diff' }> | null;
+  currentSource: ResolvedReviewSource | ReviewSource;
   entries: ReadonlyArray<HistoryEntry>;
   hasMore: boolean;
   loading: boolean;
@@ -267,11 +275,11 @@ function HistorySidebar({
       author: entry.author,
       committedAt: entry.committedAt,
       gravatarUrl: entry.gravatarUrl,
-      key: `commit:${entry.ref}`,
+      key: `commit:${entry.sha}`,
       kind: 'entry' as const,
-      ref: entry.ref,
+      ref: entry.sha,
       scope: entry.scope,
-      source: { ref: entry.ref, type: 'commit' } satisfies ReviewSource,
+      source: { ref: entry.sha, type: 'commit' } satisfies ReviewSource,
       subject: entry.subject,
     }));
     const matchesQuery = (row: (typeof commitRows)[number]) =>
@@ -340,16 +348,16 @@ function HistorySidebar({
               committedAt: null,
               gravatarUrl: undefined,
               key: getSourceKey({
-                baseRef: branchSource.baseRef,
-                headRef: branchSource.headRef,
+                baseSha: branchSource.baseSha,
+                headSha: branchSource.headSha,
                 ref: branchSource.ref,
                 type: 'branch-working-tree',
               }),
               kind: 'entry' as const,
               ref: 'branch+',
               source: {
-                baseRef: branchSource.baseRef,
-                headRef: branchSource.headRef,
+                baseSha: branchSource.baseSha,
+                headSha: branchSource.headSha,
                 ref: branchSource.ref,
                 type: 'branch-working-tree',
               } satisfies ReviewSource,

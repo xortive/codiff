@@ -1,8 +1,8 @@
 // @ts-check
 
-const { execFileSync } = require('node:child_process');
 const { realpathSync } = require('node:fs');
 const { dirname, resolve } = require('node:path');
+const { gitSync } = require('./git-state/common.cjs');
 const { parseReviewUrl } = require('./review-source.cjs');
 
 /**
@@ -26,11 +26,7 @@ const resolveRepositoryRoot = (repositoryPath) => {
   const resolvedPath = resolve(repositoryPath);
 
   try {
-    return getRealPath(
-      execFileSync('git', ['-C', resolvedPath, 'rev-parse', '--show-toplevel'], {
-        encoding: 'utf8',
-      }).trim(),
-    );
+    return getRealPath(gitSync(resolvedPath, ['rev-parse', '--show-toplevel']).trim());
   } catch {
     return getRealPath(resolvedPath);
   }
@@ -39,9 +35,7 @@ const resolveRepositoryRoot = (repositoryPath) => {
 /** @param {string} repositoryRoot @param {string} ref */
 const resolveCommitRef = (repositoryRoot, ref) => {
   try {
-    return execFileSync('git', ['-C', repositoryRoot, 'rev-parse', '--verify', `${ref}^{commit}`], {
-      encoding: 'utf8',
-    })
+    return gitSync(repositoryRoot, ['rev-parse', '--verify', `${ref}^{commit}`])
       .trim()
       .toLowerCase();
   } catch {
@@ -53,11 +47,7 @@ const resolveCommitRef = (repositoryRoot, ref) => {
 const hasWorkingTreeChanges = (repositoryRoot) => {
   try {
     return Boolean(
-      execFileSync(
-        'git',
-        ['-C', repositoryRoot, 'status', '--porcelain=v1', '-z', '--untracked-files=normal'],
-        { encoding: 'utf8' },
-      ),
+      gitSync(repositoryRoot, ['status', '--porcelain=v1', '-z', '--untracked-files=normal']),
     );
   } catch {
     return false;
@@ -67,11 +57,7 @@ const hasWorkingTreeChanges = (repositoryRoot) => {
 /** @param {string} repositoryRoot @param {string} baseRef @param {string} headRef */
 const resolveMergeBase = (repositoryRoot, baseRef, headRef) => {
   try {
-    return execFileSync('git', ['-C', repositoryRoot, 'merge-base', baseRef, headRef], {
-      encoding: 'utf8',
-    })
-      .trim()
-      .toLowerCase();
+    return gitSync(repositoryRoot, ['merge-base', baseRef, headRef]).trim().toLowerCase();
   } catch {
     return null;
   }
@@ -126,20 +112,20 @@ const getSourceKey = (repositoryRoot, source = { type: 'working-tree' }) => {
   }
 
   if (source.type === 'branch-diff') {
-    const base = resolveCommitRef(repositoryRoot, source.baseRef);
-    const head = resolveCommitRef(repositoryRoot, source.headRef);
+    const base = resolveCommitRef(repositoryRoot, source.baseSha);
+    const head = resolveCommitRef(repositoryRoot, source.headSha);
     return base && head ? `branch-diff:${source.ref}:${base}:${head}` : null;
   }
 
   if (source.type === 'branch-working-tree') {
     if (
-      typeof source.baseRef === 'string' &&
-      typeof source.headRef === 'string' &&
-      source.baseRef &&
-      source.headRef
+      typeof source.baseSha === 'string' &&
+      typeof source.headSha === 'string' &&
+      source.baseSha &&
+      source.headSha
     ) {
-      const base = resolveCommitRef(repositoryRoot, source.baseRef);
-      const head = resolveCommitRef(repositoryRoot, source.headRef);
+      const base = resolveCommitRef(repositoryRoot, source.baseSha);
+      const head = resolveCommitRef(repositoryRoot, source.headSha);
       return base && head ? `branch-working-tree:${source.ref}:${base}:${head}` : null;
     }
 
@@ -156,19 +142,19 @@ const getSourceKey = (repositoryRoot, source = { type: 'working-tree' }) => {
   return null;
 };
 
-/** @param {ReviewSource} source */
+/** @param {import('../core/types.ts').ResolvedReviewSource} source */
 const getResolvedSourceKey = (source) => {
   if (source.type === 'working-tree') {
     return 'working-tree';
   }
   if (source.type === 'commit') {
-    return `commit:${source.ref.toLowerCase()}`;
+    return `commit:${source.sha.toLowerCase()}`;
   }
   if (source.type === 'branch-diff') {
-    return `branch-diff:${source.ref}:${source.baseRef.toLowerCase()}:${source.headRef.toLowerCase()}`;
+    return `branch-diff:${source.ref}:${source.baseSha.toLowerCase()}:${source.headSha.toLowerCase()}`;
   }
-  if (source.type === 'branch-working-tree' && source.baseRef && source.headRef) {
-    return `branch-working-tree:${source.ref}:${source.baseRef.toLowerCase()}:${source.headRef.toLowerCase()}`;
+  if (source.type === 'branch-working-tree' && source.baseSha && source.headSha) {
+    return `branch-working-tree:${source.ref}:${source.baseSha.toLowerCase()}:${source.headSha.toLowerCase()}`;
   }
   if (source.type === 'pull-request') {
     return getPullRequestSourceKey(source);
@@ -213,7 +199,7 @@ const getWindowIdentity = (repositoryPath, launchOptions = {}) => {
 const getWindowIdentityForSource = (repositoryPath, source) =>
   getWindowIdentity(repositoryPath, { source });
 
-/** @param {{root: string; source: ReviewSource}} state */
+/** @param {{root: string; source: import('../core/types.ts').ResolvedReviewSource}} state */
 const getWindowIdentityForRepositoryState = (state) => {
   const repositoryRoot = getRealPath(state.root);
   const sourceKey = getResolvedSourceKey(state.source);
@@ -224,6 +210,31 @@ const getWindowIdentityForRepositoryState = (state) => {
         sourceKey,
       }
     : null;
+};
+
+/**
+ * Retarget one independent viewport after it resolves a new review source.
+ * Existing viewports are intentionally left untouched, even when this creates
+ * multiple viewports with the same working-tree identity.
+ *
+ * @param {number} webContentsId
+ * @param {{root: string; source: import('../core/types.ts').ResolvedReviewSource}} state
+ * @param {{identities: Map<number, WindowIdentity | null>, launchOptions: Map<number, CodiffLaunchOptions>, repositories: Map<number, string>}} stores
+ */
+const storeResolvedWindowState = (webContentsId, state, stores) => {
+  stores.repositories.set(webContentsId, state.root);
+  const launchOptions = stores.launchOptions.get(webContentsId);
+  if (launchOptions) {
+    stores.launchOptions.set(webContentsId, {
+      ...launchOptions,
+      source: state.source,
+    });
+  }
+  const identity = getWindowIdentityForRepositoryState(state);
+  if (identity) {
+    stores.identities.set(webContentsId, identity);
+  }
+  return identity;
 };
 
 /**
@@ -249,4 +260,5 @@ module.exports = {
   getWindowIdentity,
   getWindowIdentityForRepositoryState,
   getWindowIdentityForSource,
+  storeResolvedWindowState,
 };

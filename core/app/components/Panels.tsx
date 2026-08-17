@@ -22,6 +22,7 @@ import {
 import { matchesShortcut } from '../../config/keymap.ts';
 import type { CodiffKeymap } from '../../config/types.ts';
 import type { RepositoryLoadError, ReviewComment } from '../../lib/app-types.ts';
+import type { DiffSearchFilters } from '../../lib/diff-search.ts';
 import { buildReviewCommentsMarkdown } from '../../lib/review-comments.ts';
 import type {
   ChangedFile,
@@ -161,6 +162,30 @@ export function UpdatePill({
   );
 }
 
+export function ReviewCommentsLoadBanner({
+  onRetry,
+  reason,
+}: {
+  onRetry: () => void;
+  reason: string | null;
+}) {
+  return (
+    <div
+      aria-live="polite"
+      className={`repository-change-banner${reason ? ' visible' : ''}`}
+      role="status"
+    >
+      <span className="repository-change-banner-content">
+        <strong>Review comments unavailable.</strong>
+        <span>{reason ?? ''}</span>
+      </span>
+      <button className="repository-change-reload" onClick={onRetry} type="button">
+        Retry
+      </button>
+    </div>
+  );
+}
+
 export function WalkthroughOutdatedBanner({
   onDismiss,
   reason,
@@ -284,22 +309,26 @@ export function AgentUnavailablePanel({
 
 export function DiffSearchPanel({
   activeIndex,
+  filters,
   focusRequest,
   keymap,
   matchCount,
   onChange,
   onClose,
+  onFiltersChange,
   onNext,
   onPrevious,
   query,
   visible,
 }: {
   activeIndex: number;
+  filters: DiffSearchFilters;
   focusRequest: number;
   keymap: CodiffKeymap;
   matchCount: number;
   onChange: (query: string) => void;
   onClose: () => void;
+  onFiltersChange: (filters: DiffSearchFilters) => void;
   onNext: () => void;
   onPrevious: () => void;
   query: string;
@@ -356,6 +385,26 @@ export function DiffSearchPanel({
       <span className="diff-search-count">
         {query.trim() ? (matchCount > 0 ? `${activeIndex + 1}/${matchCount}` : '0/0') : ''}
       </span>
+      <div aria-label="Search line filters" className="diff-search-filters">
+        {(
+          [
+            ['additions', 'New lines'],
+            ['deletions', 'Old lines'],
+            ['unchanged', 'Unchanged lines'],
+          ] as const
+        ).map(([key, label]) => (
+          <label key={key}>
+            <input
+              checked={filters[key]}
+              onChange={(event) =>
+                onFiltersChange({ ...filters, [key]: event.currentTarget.checked })
+              }
+              type="checkbox"
+            />
+            {label}
+          </label>
+        ))}
+      </div>
       <button
         aria-label="Previous match"
         disabled={matchCount === 0}
@@ -382,11 +431,13 @@ export function DiffSearchPanel({
 }
 
 export function CopyCommentsButton({
+  actionLabel,
   comments,
   files,
   reviewCommentsPrefix,
   showWhitespace,
 }: {
+  actionLabel?: string;
   comments: ReadonlyArray<ReviewComment>;
   files: ReadonlyArray<ChangedFile>;
   reviewCommentsPrefix: string;
@@ -415,16 +466,19 @@ export function CopyCommentsButton({
   return (
     <button
       aria-label={
-        pendingCommentCount === 0
+        actionLabel ??
+        (pendingCommentCount === 0
           ? 'Copy review comments as markdown, no comments yet'
           : `Copy ${pendingCommentCount} review ${
               pendingCommentCount === 1 ? 'comment' : 'comments'
-            }`
+            }`)
       }
       className={`copy-comments-button${copied ? ' copied' : ''}`}
       disabled={pendingCommentCount === 0}
       onClick={() => void copyComments()}
-      title="Copy review comments as markdown"
+      title={
+        actionLabel ? `${actionLabel} (${pendingCommentCount})` : 'Copy review comments as markdown'
+      }
       type="button"
     >
       {copied ? (
@@ -538,7 +592,7 @@ function PullRequestReviewAction({
   }
 
   const submitWithComment = useCallback(() => {
-    if (disabled || !trimmedBody) {
+    if (disabled || !onSubmitReview || !trimmedBody) {
       return;
     }
     void Promise.resolve(onSubmitReview(event, trimmedBody))
@@ -550,7 +604,7 @@ function PullRequestReviewAction({
   }, [disabled, event, onSubmitReview, trimmedBody]);
 
   const submitWithoutComment = useCallback(() => {
-    if (primaryDisabled) {
+    if (primaryDisabled || !onSubmitReview) {
       return;
     }
     setOpen(false);
@@ -661,24 +715,25 @@ export function PullRequestReviewButtons({
   onClosePullRequest,
   onSubmitReview,
   reviewStatus,
-  showCommentReview = false,
 }: {
   children?: ReactNode;
   disabled: boolean;
   hasPendingComments: boolean;
   onClosePullRequest?: () => void;
-  onSubmitReview: (event: PullRequestReviewEvent, body?: string) => Promise<void> | void;
+  onSubmitReview?: (event: PullRequestReviewEvent, body?: string) => Promise<void> | void;
   reviewStatus?: PullRequestReviewStatus;
-  showCommentReview?: boolean;
 }) {
   const approveBlocked = isPullRequestReviewActionDisabled(reviewStatus, 'APPROVE');
   const commentBlocked = isPullRequestReviewActionDisabled(reviewStatus, 'COMMENT');
   const requestChangesBlocked = isPullRequestReviewActionDisabled(reviewStatus, 'REQUEST_CHANGES');
+  const canSubmitReview = onSubmitReview != null;
   const closeStatus = reviewStatus?.close;
   const closeVisible = onClosePullRequest && closeStatus && closeStatus.disabled !== true;
-  const commentVisible = showCommentReview && !commentBlocked;
+  const commentVisible = canSubmitReview && !commentBlocked;
   const hasReviewActions =
-    commentVisible || !approveBlocked || !requestChangesBlocked || closeVisible;
+    commentVisible ||
+    (canSubmitReview && (!approveBlocked || !requestChangesBlocked)) ||
+    closeVisible;
   if (!hasReviewActions && !children) {
     return null;
   }
@@ -703,11 +758,11 @@ export function PullRequestReviewButtons({
             />
           }
           label="Comment"
-          onSubmitReview={onSubmitReview}
+          onSubmitReview={onSubmitReview!}
           title={getPullRequestReviewActionTitle(reviewStatus, 'COMMENT', 'Submit review comments')}
         />
       ) : null}
-      {!approveBlocked ? (
+      {canSubmitReview && !approveBlocked ? (
         <PullRequestReviewAction
           disabled={disabled}
           event="APPROVE"
@@ -715,11 +770,11 @@ export function PullRequestReviewButtons({
             <Check aria-hidden className="review-submit-icon approve" size={15} weight="bold" />
           }
           label="Approve"
-          onSubmitReview={onSubmitReview}
+          onSubmitReview={onSubmitReview!}
           title={getPullRequestReviewActionTitle(reviewStatus, 'APPROVE', 'Approve review')}
         />
       ) : null}
-      {!requestChangesBlocked ? (
+      {canSubmitReview && !requestChangesBlocked ? (
         <PullRequestReviewAction
           disabled={disabled}
           event="REQUEST_CHANGES"
@@ -732,7 +787,7 @@ export function PullRequestReviewButtons({
             />
           }
           label="Request Changes"
-          onSubmitReview={onSubmitReview}
+          onSubmitReview={onSubmitReview!}
           title={getPullRequestReviewActionTitle(
             reviewStatus,
             'REQUEST_CHANGES',

@@ -17,6 +17,9 @@ const codiff = {
   applyUpdate: () => ipcRenderer.invoke('codiff:applyUpdate'),
   askReviewAssistant: (request) => ipcRenderer.invoke('codiff:askReviewAssistant', request),
   dismissUpdate: () => ipcRenderer.invoke('codiff:dismissUpdate'),
+  cancelDiffContentRequest: (requestId) =>
+    ipcRenderer.send('codiff:cancelDiffContentRequest', requestId),
+  cancelNarrativeWalkthrough: () => ipcRenderer.invoke('codiff:cancelNarrativeWalkthrough'),
   createWalkthroughCommit: (request) =>
     ipcRenderer.invoke('codiff:createWalkthroughCommit', request),
   completePlan: (review, status) => ipcRenderer.invoke('codiff:completePlan', review, status),
@@ -37,6 +40,8 @@ const codiff = {
   getRepositoryHistory: (limit, source) =>
     ipcRenderer.invoke('codiff:getRepositoryHistory', limit, source),
   getRepositoryState: (source) => ipcRenderer.invoke('codiff:getRepositoryState', source),
+  getReviewComments: (source, requestId) =>
+    ipcRenderer.invoke('codiff:getReviewComments', source, requestId),
   getTerminalHelperStatus: () => ipcRenderer.invoke('codiff:getTerminalHelperStatus'),
   getUpdateStatus: () => ipcRenderer.invoke('codiff:getUpdateStatus'),
   getNarrativeWalkthrough: (source, options) =>
@@ -138,12 +143,15 @@ const codiff = {
   openFile: (path) => ipcRenderer.invoke('codiff:openFile', path),
   openRepositoryFolder: () => ipcRenderer.invoke('codiff:openRepositoryFolder'),
   resolvePullRequestUrl: (value) => ipcRenderer.invoke('codiff:resolvePullRequestUrl', value),
+  reportInitialLoadMilestone: (name) => ipcRenderer.send('codiff:initialLoadMilestone', name),
   setDiffStyle: (value) => ipcRenderer.invoke('codiff:setDiffStyle', value),
   setShowOutdated: (value) => ipcRenderer.invoke('codiff:setShowOutdated', value),
   setWordWrap: (value) => ipcRenderer.invoke('codiff:setWordWrap', value),
   sharePlan: (review) => ipcRenderer.invoke('codiff:sharePlan', review),
   shareWalkthrough: (snapshot) => ipcRenderer.invoke('codiff:shareWalkthrough', snapshot),
   resetCodeFontSize: () => ipcRenderer.invoke('codiff:resetCodeFontSize'),
+  resolveReviewContext: (request, requestId) =>
+    ipcRenderer.invoke('codiff:resolveReviewContext', request, requestId),
   saveMarkdownDocument: (request) => ipcRenderer.invoke('codiff:saveMarkdownDocument', request),
   savePlanReview: (review) => ipcRenderer.invoke('codiff:savePlanReview', review),
   showInFolder: (path) => ipcRenderer.invoke('codiff:showInFolder', path),
