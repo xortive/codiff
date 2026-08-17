@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { SidebarMode, WalkthroughError } from '../../lib/app-types.ts';
+import {
+  parseWalkthroughModel,
+  resolveWalkthroughFiles,
+} from '../../lib/narrative-walkthrough-schema.ts';
 import { buildCommitModel, buildGenericCommitModel } from '../../lib/narrative-walkthrough.ts';
 import type { ReloadMainMode } from '../../lib/reload-selection.ts';
 import {
@@ -10,13 +14,14 @@ import { getSourceRevisionKey } from '../../lib/source.ts';
 import type {
   ChangedFile,
   CodiffPreferences,
-  NarrativeWalkthrough,
   NarrativeWalkthroughResult,
   NarrativeWalkthroughRequestOptions,
+  PersistedWalkthrough,
   RepositoryState,
   SharedWalkthroughSnapshot,
   WalkthroughCommitMessageRequest,
   WalkthroughCommitRequest,
+  WalkthroughModel,
   WalkthroughProgressEvent,
 } from '../../types.ts';
 import type { WalkthroughReviewTarget } from '../components/walkthrough/NarrativeWalkthroughView.tsx';
@@ -37,6 +42,7 @@ type UseAppWalkthroughOptions = {
 };
 
 const emptyFiles: ReadonlyArray<ChangedFile> = [];
+const emptyPendingAssessmentThreadIds: ReadonlySet<string> = new Set();
 
 export function useAppWalkthrough({
   initialMainMode = 'review',
@@ -50,10 +56,10 @@ export function useAppWalkthrough({
   stateRef,
 }: UseAppWalkthroughOptions) {
   const [mainMode, setMainMode] = useState<ReloadMainMode>(initialMainMode);
-  const initialWalkthrough =
+  const initialPersistedWalkthrough =
     initialWalkthroughResult?.status === 'ready' ? initialWalkthroughResult.walkthrough : null;
-  const [narrativeWalkthrough, setNarrativeWalkthrough] = useState<NarrativeWalkthrough | null>(
-    initialWalkthrough,
+  const [narrativeWalkthrough, setNarrativeWalkthrough] = useState<WalkthroughModel | null>(() =>
+    initialPersistedWalkthrough ? parseWalkthroughModel(initialPersistedWalkthrough) : null,
   );
   const [shareWalkthroughEnabled, setShareWalkthroughEnabled] = useState(false);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>(initialSidebarMode);
@@ -72,9 +78,25 @@ export function useAppWalkthrough({
   }>({ generation: null, phase: null, responseLabelIndex: -1, stageRevision: 0 });
   const [walkthroughSharing, setWalkthroughSharing] = useState(false);
   const [walkthroughUnread, setWalkthroughUnread] = useState(false);
+  const [pendingAssessmentThreadIds, setPendingAssessmentThreadIds] = useState<ReadonlySet<string>>(
+    () =>
+      new Set(
+        initialWalkthroughResult?.status === 'ready'
+          ? (initialWalkthroughResult.pendingAssessmentThreadIds ?? [])
+          : [],
+      ),
+  );
   const activeReviewCommandTargetRef = useRef<ReviewCommandTarget | null>(null);
+  const activeWalkthroughCacheKeyRef = useRef<string | null>(
+    initialWalkthroughResult?.status === 'ready'
+      ? (initialWalkthroughResult.cacheKey ?? null)
+      : null,
+  );
   const mainModeRef = useRef<ReloadMainMode>(initialMainMode);
-  const narrativeWalkthroughRef = useRef<NarrativeWalkthrough | null>(narrativeWalkthrough);
+  const narrativeWalkthroughRef = useRef<WalkthroughModel | null>(narrativeWalkthrough);
+  const persistedNarrativeWalkthroughRef = useRef<PersistedWalkthrough | null>(
+    initialPersistedWalkthrough,
+  );
   const sidebarModeRef = useRef<SidebarMode>(initialSidebarMode);
   const walkthroughErrorRef = useRef<WalkthroughError | null>(walkthroughError);
   const walkthroughLoadingRef = useRef(initialWalkthroughLoading);
@@ -83,9 +105,13 @@ export function useAppWalkthrough({
   const initialSourceKeyRef = useRef(state ? getSourceRevisionKey(state.source) : null);
   const initialStateGenerationRef = useRef(0);
   const navigationResetKey = state ? `${state.root}:${getSourceRevisionKey(state.source)}` : '';
-  const narrativeNavigation = useNarrativeNavigation(
+  const narrativeWalkthroughFiles = resolveWalkthroughFiles(
     narrativeWalkthrough,
     state?.files ?? emptyFiles,
+  );
+  const narrativeNavigation = useNarrativeNavigation(
+    narrativeWalkthrough,
+    narrativeWalkthroughFiles,
     navigationResetKey,
   );
   const setWalkthroughLoading = useCallback((loading: boolean) => {
@@ -132,7 +158,12 @@ export function useAppWalkthrough({
       }
       setWalkthroughLoading(false);
       if (initialWalkthroughResult.status === 'ready') {
-        setNarrativeWalkthrough(initialWalkthroughResult.walkthrough);
+        activeWalkthroughCacheKeyRef.current = initialWalkthroughResult.cacheKey ?? null;
+        setPendingAssessmentThreadIds(
+          new Set(initialWalkthroughResult.pendingAssessmentThreadIds ?? []),
+        );
+        persistedNarrativeWalkthroughRef.current = initialWalkthroughResult.walkthrough;
+        setNarrativeWalkthrough(parseWalkthroughModel(initialWalkthroughResult.walkthrough));
         setWalkthroughError(null);
       } else {
         setWalkthroughError(initialWalkthroughResult);
@@ -150,6 +181,8 @@ export function useAppWalkthrough({
 
   useEffect(() => {
     activeReviewCommandTargetRef.current = null;
+    activeWalkthroughCacheKeyRef.current = null;
+    queueMicrotask(() => setPendingAssessmentThreadIds(emptyPendingAssessmentThreadIds));
   }, [navigationResetKey]);
 
   useEffect(
@@ -172,8 +205,25 @@ export function useAppWalkthrough({
     [],
   );
 
+  useEffect(
+    () =>
+      window.codiff.onNarrativeWalkthroughUpdated(
+        ({ cacheKey, pendingAssessmentThreadIds: pendingIds, walkthrough }) => {
+          if (activeWalkthroughCacheKeyRef.current !== cacheKey) {
+            return;
+          }
+          persistedNarrativeWalkthroughRef.current = walkthrough;
+          setNarrativeWalkthrough(parseWalkthroughModel(walkthrough));
+          setPendingAssessmentThreadIds(new Set(pendingIds));
+        },
+      ),
+    [],
+  );
+
   const startWalkthroughLoading = useCallback(() => {
     walkthroughProgressEnabledRef.current = true;
+    activeWalkthroughCacheKeyRef.current = null;
+    setPendingAssessmentThreadIds(emptyPendingAssessmentThreadIds);
     setWalkthroughProgress((current) => ({
       generation: null,
       phase: null,
@@ -217,6 +267,16 @@ export function useAppWalkthrough({
     [stateRef],
   );
 
+  const applyNarrativeWalkthroughResult = useCallback(
+    (result: Extract<NarrativeWalkthroughResult, { status: 'ready' }>) => {
+      activeWalkthroughCacheKeyRef.current = result.cacheKey ?? null;
+      setPendingAssessmentThreadIds(new Set(result.pendingAssessmentThreadIds ?? []));
+      persistedNarrativeWalkthroughRef.current = result.walkthrough;
+      setNarrativeWalkthrough(parseWalkthroughModel(result.walkthrough));
+    },
+    [],
+  );
+
   const loadNarrativeWalkthrough = useCallback(
     (source: RepositoryState['source'], options?: NarrativeWalkthroughRequestOptions) => {
       const request = walkthroughRequestRef.current + 1;
@@ -229,6 +289,8 @@ export function useAppWalkthrough({
         getSourceRevisionKey(stateRef.current?.source ?? source) === sourceKey;
       startWalkthroughLoading();
       setWalkthroughError(null);
+      activeWalkthroughCacheKeyRef.current = null;
+      setPendingAssessmentThreadIds(emptyPendingAssessmentThreadIds);
       return window.codiff
         .getNarrativeWalkthrough(source, options)
         .then((result) => {
@@ -237,7 +299,7 @@ export function useAppWalkthrough({
           }
 
           if (result.status === 'ready') {
-            setNarrativeWalkthrough(result.walkthrough);
+            applyNarrativeWalkthroughResult(result);
             if (sidebarModeRef.current === 'walkthrough') {
               setWalkthroughUnread(false);
             } else {
@@ -263,13 +325,13 @@ export function useAppWalkthrough({
           }
         });
     },
-    [setWalkthroughLoading, startWalkthroughLoading, stateGenerationRef, stateRef],
+    [applyNarrativeWalkthroughResult, setWalkthroughLoading, startWalkthroughLoading, stateGenerationRef, stateRef],
   );
 
   const refreshWalkthroughForState = useCallback(
     (
       nextState: RepositoryState,
-      previousWalkthrough: NarrativeWalkthrough | null = narrativeWalkthroughRef.current,
+      previousWalkthrough: PersistedWalkthrough | null = persistedNarrativeWalkthroughRef.current,
     ) => {
       if (
         sidebarModeRef.current !== 'walkthrough' &&
@@ -280,6 +342,9 @@ export function useAppWalkthrough({
       }
 
       walkthroughRequestRef.current += 1;
+      persistedNarrativeWalkthroughRef.current = null;
+      activeWalkthroughCacheKeyRef.current = null;
+      setPendingAssessmentThreadIds(emptyPendingAssessmentThreadIds);
       setNarrativeWalkthrough(null);
       setWalkthroughError(null);
       setWalkthroughLoading(false);
@@ -314,6 +379,7 @@ export function useAppWalkthrough({
         return;
       }
       if (state.files.length === 0) {
+        persistedNarrativeWalkthroughRef.current = null;
         setNarrativeWalkthrough(null);
         setWalkthroughError(null);
         setWalkthroughLoading(false);
@@ -366,7 +432,7 @@ export function useAppWalkthrough({
 
   const shareWalkthrough = useCallback(() => {
     const currentState = stateRef.current;
-    const currentWalkthrough = narrativeWalkthroughRef.current;
+    const currentWalkthrough = persistedNarrativeWalkthroughRef.current;
     if (!shareWalkthroughEnabled || !currentState || !currentWalkthrough || walkthroughSharing) {
       return;
     }
@@ -422,9 +488,21 @@ export function useAppWalkthrough({
   );
   const showPlainCommitView =
     mainMode === 'commit' && state?.source.type === 'working-tree' && state.files.length > 0;
+  const setPersistedNarrativeWalkthrough = useCallback(
+    (walkthrough: PersistedWalkthrough | null) => {
+      if (!walkthrough) {
+        activeWalkthroughCacheKeyRef.current = null;
+        setPendingAssessmentThreadIds(emptyPendingAssessmentThreadIds);
+      }
+      persistedNarrativeWalkthroughRef.current = walkthrough;
+      setNarrativeWalkthrough(walkthrough ? parseWalkthroughModel(walkthrough) : null);
+    },
+    [],
+  );
 
   return {
     activeReviewCommandTargetRef,
+    applyNarrativeWalkthroughResult,
     cancelWalkthroughRequest,
     changeSidebarMode,
     closeCommitView,
@@ -434,12 +512,15 @@ export function useAppWalkthrough({
     mainModeRef,
     narrativeNavigation,
     narrativeWalkthrough,
+    narrativeWalkthroughFiles,
     narrativeWalkthroughRef,
     openCommitView,
+    pendingAssessmentThreadIds,
+    persistedNarrativeWalkthroughRef,
     plainCommitModel,
     refreshWalkthroughForState,
     setMainMode,
-    setNarrativeWalkthrough,
+    setNarrativeWalkthrough: setPersistedNarrativeWalkthrough,
     setShareWalkthroughEnabled,
     setSidebarMode,
     setWalkthroughError,

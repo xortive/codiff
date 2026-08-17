@@ -47,6 +47,16 @@ const hunkGroupProperties = {
   title: { type: 'string' },
 };
 
+const regionProperties = {
+  endLine: { maximum: 1_000_000_000, minimum: 1, type: 'number' },
+  hunkId: { type: 'string' },
+  id: { type: 'string' },
+  side: { enum: ['additions', 'deletions'], type: 'string' },
+  startLine: { maximum: 1_000_000_000, minimum: 1, type: 'number' },
+  title: { maxLength: 120, type: 'string' },
+  tooltip: { maxLength: 600, type: 'string' },
+};
+
 // Keep in sync with core/walkthrough/narrative-walkthrough.schema.json;
 // electron/__tests__/narrative-walkthrough.test.ts enforces equality.
 // Authoring agents constrain output to it; the renderer trusts only the
@@ -76,6 +86,16 @@ const narrativeWalkthroughSchema = {
                 ...hunkGroupProperties,
                 importance: { enum: [...IMPORTANCES], type: 'string' },
                 prose: { type: 'string' },
+                regions: {
+                  items: {
+                    additionalProperties: false,
+                    properties: regionProperties,
+                    required: ['id', 'hunkId', 'side', 'startLine', 'endLine', 'title', 'tooltip'],
+                    type: 'object',
+                  },
+                  maxItems: 4,
+                  type: 'array',
+                },
               },
               required: ['id', 'hunkIds', 'importance', 'prose'],
               type: 'object',
@@ -107,9 +127,8 @@ const narrativeWalkthroughSchema = {
       type: 'array',
     },
     title: { type: 'string' },
-    version: { const: 4, type: 'number' },
   },
-  required: ['version', 'kind', 'title', 'focus', 'chapters'],
+  required: ['kind', 'title', 'focus', 'chapters'],
   type: 'object',
 };
 
@@ -134,6 +153,9 @@ const narrativeWalkthroughGenerationSchema = {
                 id: hunkGroupProperties.id,
                 importance: { enum: [...IMPORTANCES], type: 'string' },
                 prose: { type: 'string' },
+                regions:
+                  narrativeWalkthroughSchema.properties.chapters.items.properties.stops.items
+                    .properties.regions,
                 title: { maxLength: 80, type: 'string' },
               },
               required: ['id', 'hunkIds', 'importance', 'prose', 'title'],
@@ -146,9 +168,8 @@ const narrativeWalkthroughGenerationSchema = {
     focus: narrativeWalkthroughSchema.properties.focus,
     kind: narrativeWalkthroughSchema.properties.kind,
     title: narrativeWalkthroughSchema.properties.title,
-    version: narrativeWalkthroughSchema.properties.version,
   },
-  required: ['version', 'kind', 'title', 'focus', 'chapters'],
+  required: ['kind', 'title', 'focus', 'chapters'],
   type: 'object',
 };
 
@@ -208,6 +229,25 @@ const narrativeWalkthroughResponseSchema = strictResponseSchema(
   narrativeWalkthroughGenerationSchema,
 );
 
+const walkthroughAssessmentResponseSchema = {
+  additionalProperties: false,
+  properties: {
+    disposition: {
+      enum: [
+        'addressed',
+        'partially-addressed',
+        'still-applies',
+        'no-longer-applicable',
+        'unclear',
+      ],
+      type: 'string',
+    },
+    explanation: { type: 'string' },
+  },
+  required: ['disposition', 'explanation'],
+  type: 'object',
+};
+
 module.exports = {
   AGENTS,
   CHANGE_TYPES,
@@ -218,4 +258,5 @@ module.exports = {
   MAX_HUNKS_PER_WALKTHROUGH_GROUP,
   narrativeWalkthroughResponseSchema,
   narrativeWalkthroughSchema,
+  walkthroughAssessmentResponseSchema,
 };

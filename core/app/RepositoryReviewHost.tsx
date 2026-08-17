@@ -132,6 +132,36 @@ const toPullRequestReviewEvent = (
   }
 };
 
+const projectReleasedWalkthroughSource = (
+  source: RepositoryState['source'],
+): NarrativeWalkthrough['source'] => {
+  if (source.type !== 'pull-request') {
+    return source;
+  }
+  return {
+    ...(source.author !== undefined ? { author: source.author } : {}),
+    ...(source.canEditDescription !== undefined
+      ? { canEditDescription: source.canEditDescription }
+      : {}),
+    ...(source.canEditReviewers !== undefined ? { canEditReviewers: source.canEditReviewers } : {}),
+    ...(source.canEditTitle !== undefined ? { canEditTitle: source.canEditTitle } : {}),
+    ...(source.description !== undefined ? { description: source.description } : {}),
+    ...(source.headSha !== undefined ? { headSha: source.headSha } : {}),
+    ...(source.host !== undefined ? { host: source.host } : {}),
+    ...(source.mergeState !== undefined ? { mergeState: source.mergeState } : {}),
+    ...(source.number !== undefined ? { number: source.number } : {}),
+    ...(source.owner !== undefined ? { owner: source.owner } : {}),
+    ...(source.projectPath !== undefined ? { projectPath: source.projectPath } : {}),
+    ...(source.provider !== undefined ? { provider: source.provider } : {}),
+    ...(source.repo !== undefined ? { repo: source.repo } : {}),
+    ...(source.reviewers !== undefined ? { reviewers: source.reviewers } : {}),
+    ...(source.reviewStatus !== undefined ? { reviewStatus: source.reviewStatus } : {}),
+    ...(source.title !== undefined ? { title: source.title } : {}),
+    type: 'pull-request',
+    url: source.url,
+  };
+};
+
 const createPlaceholderWalkthrough = (
   state: RepositoryState,
   title: string,
@@ -143,7 +173,7 @@ const createPlaceholderWalkthrough = (
   generatedAt: new Date(state.generatedAt).toISOString(),
   kind: 'narrative',
   repo: { branch: state.branch, root: state.root },
-  source: state.source,
+  source: projectReleasedWalkthroughSource(state.source),
   support: [],
   title,
   version: 4,
@@ -449,8 +479,10 @@ export function RepositoryReviewHost({
     mainModeRef,
     narrativeNavigation,
     narrativeWalkthrough,
+    narrativeWalkthroughFiles,
     narrativeWalkthroughRef,
     openCommitView,
+    persistedNarrativeWalkthroughRef,
     plainCommitModel,
     refreshWalkthroughForState,
     setMainMode,
@@ -816,7 +848,7 @@ export function RepositoryReviewHost({
     sourceSessionsRef.current.set(getSourceRevisionKey(currentState.source), {
       collapsed: new Set(collapsedRef.current),
       expandedGenerated: new Set(expandedGeneratedRef.current),
-      narrativeWalkthrough: narrativeWalkthroughRef.current,
+      narrativeWalkthrough: persistedNarrativeWalkthroughRef.current,
       reviewComments: reviewCommentsRef.current,
       selectedPath: selectedPathRef.current,
       viewed: viewedRef.current,
@@ -827,7 +859,7 @@ export function RepositoryReviewHost({
         status,
       })),
     });
-  }, [narrativeWalkthroughRef, reviewCommentsRef, walkthroughErrorRef]);
+  }, [persistedNarrativeWalkthroughRef, reviewCommentsRef, walkthroughErrorRef]);
 
   useEffect(
     () =>
@@ -1463,7 +1495,8 @@ export function RepositoryReviewHost({
       state,
       title,
       walkthrough:
-        narrativeWalkthrough ?? createPlaceholderWalkthrough(state, title, walkthroughAgent),
+        persistedNarrativeWalkthroughRef.current ??
+        createPlaceholderWalkthrough(state, title, walkthroughAgent),
     }),
     ...(source.type === 'pull-request'
       ? {
@@ -1699,6 +1732,7 @@ export function RepositoryReviewHost({
       providerLabel={
         source.type === 'pull-request' && source.provider === 'gitlab' ? 'GitLab' : 'GitHub'
       }
+      pendingAssessmentThreadIds={pendingAssessmentThreadIds}
       snapshot={snapshot}
       title={title}
     />

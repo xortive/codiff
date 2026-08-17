@@ -96,6 +96,10 @@ import { abbreviateHomePath, sortFiles } from './lib/files.ts';
 import { isNativeInputTarget } from './lib/keyboard.ts';
 import { isGeneratedWalkthroughFile } from './lib/narrative-walkthrough-diff.js';
 import {
+  parseWalkthroughModel,
+  resolveWalkthroughFiles,
+} from './lib/narrative-walkthrough-schema.ts';
+import {
   resolveProviderCommentTarget,
   resolveShareCommentTarget,
 } from './lib/review-comment-target.ts';
@@ -128,6 +132,10 @@ import {
   getSourceKey,
   supportsDiffSearchContentPreload,
 } from './lib/source.ts';
+import {
+  assessmentComponentByThreadId,
+  currentThreadStateById,
+} from './lib/walkthrough-assessment-display.ts';
 import type {
   ChangedFile,
   DiffImageContentRequest,
@@ -136,6 +144,7 @@ import type {
   GitIdentity,
   HistoryEntry,
   NarrativeWalkthrough,
+  PersistedWalkthrough,
   PullRequestMergeOptions,
   PullRequestGeneralComment,
   PullRequestGeneralCommentThread,
@@ -369,7 +378,7 @@ export const buildSharedReviewSnapshot = ({
   preferences: SharedWalkthroughSnapshot['preferences'];
   state: RepositoryState;
   title: string;
-  walkthrough: NarrativeWalkthrough;
+  walkthrough: PersistedWalkthrough;
 }): SharedWalkthroughSnapshot => ({
   branch: state.branch,
   codeQualityFindings: state.codeQualityFindings,
@@ -442,6 +451,7 @@ type ReviewSurfaceBaseProps = {
   keymap?: CodiffKeymap;
   onCommandBridgeChange?: (bridge: ReviewSurfaceCommandBridge | null) => void;
   onDeleteShare?: () => Promise<void> | void;
+  pendingAssessmentThreadIds?: ReadonlySet<string>;
   providerLabel?: string;
   repositoryUrl?: string;
   settingsBar?: ReactNode;
@@ -472,6 +482,7 @@ export function ReviewSurface({
   keymap: keymapProp,
   onCommandBridgeChange,
   onDeleteShare,
+  pendingAssessmentThreadIds,
   providerLabel = 'provider',
   repositoryUrl,
   settingsBar,
@@ -544,16 +555,17 @@ export function ReviewSurface({
   const sharedWalkthrough = useMemo(
     () =>
       walkthrough?.commit
-        ? snapshot.walkthrough
+        ? parseWalkthroughModel(snapshot.walkthrough)
         : {
-            ...snapshot.walkthrough,
+            ...parseWalkthroughModel(snapshot.walkthrough),
             commit: undefined,
           },
     [snapshot.walkthrough, walkthrough?.commit],
   );
+  const walkthroughFiles = resolveWalkthroughFiles(sharedWalkthrough, snapshot.files);
   const navigation = useNarrativeNavigation(
     sharedWalkthrough,
-    snapshot.files,
+    walkthroughFiles,
     `${snapshot.repository.root}:${getSourceKey(snapshot.repository.source)}`,
   );
   const defaultKeymap = useMemo(() => createDefaultConfig().keymap, []);
@@ -729,6 +741,17 @@ export function ReviewSurface({
         (comment) => isReviewDraft(comment) || comment.resolvedSectionId != null,
       ),
     [reviewComments],
+  );
+  const assessmentComponents = useMemo(
+    () => assessmentComponentByThreadId(sharedWalkthrough),
+    [sharedWalkthrough],
+  );
+  const liveReviewState = useMemo(
+    () => ({
+      currentThreadStateById: currentThreadStateById(visibleSnapshotReviewComments),
+      pendingAssessmentThreadIds,
+    }),
+    [pendingAssessmentThreadIds, visibleSnapshotReviewComments],
   );
   const {
     activeReviewCommentDraftRef,
@@ -1596,8 +1619,9 @@ export function ReviewSurface({
   );
   const commonReviewProps = {
     activeSearchMatch: activeDiffSearchMatch,
-    agentId: snapshot.walkthrough.agent,
-    agentLabel: getAgentLabel(snapshot.walkthrough.agent),
+    agentId: sharedWalkthrough.agent,
+    agentLabel: getAgentLabel(sharedWalkthrough.agent),
+    assessmentComponents,
     codeQualityFindings: snapshot.codeQualityFindings,
     collapsed,
     comments: renderableReviewComments,
@@ -1614,6 +1638,7 @@ export function ReviewSurface({
     isReadOnly: !canComment,
     itemVersionByKey,
     keymap,
+    liveReviewState,
     loadingSectionIds: content?.loadingSectionIds ?? new Set<string>(),
     onAskCodex:
       localReviewNotes?.onAsk || providerComments?.authoring.onAsk || shareComments?.authoring.onAsk
@@ -2149,7 +2174,7 @@ export function ReviewSurface({
           ) : walkthroughReady ? (
             <NarrativeWalkthroughView
               allowCommit={walkthrough?.commit != null}
-              files={snapshot.files}
+              files={walkthroughFiles}
               navigation={navigation}
               onActiveReviewTargetChange={desktop?.onActiveWalkthroughReviewTargetChange ?? noop}
               onCommit={walkthrough?.commit ?? disabledCommit}
