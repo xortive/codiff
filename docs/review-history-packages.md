@@ -51,3 +51,52 @@ same-commit request stays an empty same-commit result.
 `createReviewArtifactRun` deduplicates overlapping reads only within one
 request. Range reads are cached and diagnosed by their requested selector
 pair, not by a provider-resolved effective pair.
+
+Durable cache keys (`createCommitArtifactKey`, `createRangeArtifactKey`,
+`createBlobArtifactKey`), `ReviewVersionRecord`, and `ReviewProviderAdapter`
+are for later persisted history and provider-history packages.
+
+`ReviewArtifactSource` acquires stacks, ranges, commits, and blobs in bulk and
+accepts an `AbortSignal` at every read boundary. `createReviewArtifactRun`
+deduplicates overlapping reads only within one request and reuses resolved
+object IDs without sharing cancelable work across unrelated requests.
+
+## Provider adapters and host I/O
+
+`ReviewProviderAdapter<ReviewReference, CurrentReview>` pairs a normalized
+current-review read with the `ReviewArtifactSource` for the same provider
+reference. The reference and current-review shapes remain provider-package
+types; the composition boundary itself is forge-neutral.
+
+Hosts inject transports into provider packages. Desktop hosts may implement an
+Artifact Source with native Git, while API-backed and Web hosts may implement
+the same contract over bounded HTTP reads. Correctness depends on the shared
+artifact and completeness contracts, not on the transport.
+
+## Historical review adapters
+
+`@nkzw/codiff-gitlab` owns numbered merge-request version discovery, immutable
+version coordinates, provider Artifact Sources, historical comparison reads,
+and GitLab normalization. `@nkzw/codiff-github` owns the equivalent
+force-push timeline, including the explicit limitations of reconstructing
+historical base coordinates from GitHub events.
+
+Both packages expose separately callable aggregate and commit-evolution reads.
+They normalize provider responses into Core Stack, Range, Commit, and Blob
+Artifacts before invoking shared matching or replay. They do not return
+provider-authored classifications, silently turn missing patches into empty
+changes, or replace incomplete host evidence with a second hidden acquisition
+path.
+
+## Host integration
+
+Electron and Web hosts inject authentication, transports, optional native-Git
+Artifact Sources, persistence, cancellation ownership, and request scheduling.
+Hosts may cache immutable artifacts and derived results by the complete Core
+algorithm identity, but provider packages remain free of process spawning,
+IPC, and UI state.
+
+Codiff Web should import these packages rather than copying version discovery,
+artifact normalization, matching, or regional replay. Its D1/R2 storage,
+Workers transport, request scheduler, and comparison-run lifetime remain host
+responsibilities.

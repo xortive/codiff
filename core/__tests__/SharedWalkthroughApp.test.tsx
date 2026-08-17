@@ -9,8 +9,12 @@ import { ReviewTopBar } from '../app/components/ReviewTopBar.tsx';
 import { createDefaultConfig } from '../config/defaults.ts';
 import { ReviewSurface } from '../SharedWalkthroughApp.tsx';
 import type {
+  DiffComparisonView,
+  EvolutionUnitId,
   GitSha,
   NarrativeWalkthrough,
+  ReviewCommitEvolution,
+  ReviewVersionOption,
   SharedWalkthroughSnapshot,
   WalkthroughArtifactV5,
 } from '../types.ts';
@@ -56,6 +60,11 @@ const createMarkdownFile = (path = 'README.md') =>
       },
     ],
   }) satisfies SharedWalkthroughSnapshot['files'][number];
+
+const revision = (sha: GitSha, text: string) => ({
+  label: { kind: 'version' as const, text },
+  sha,
+});
 
 const commenting = {
   canComment: false,
@@ -992,4 +1001,185 @@ test('shared walkthroughs initially preview Markdown when other files are genera
   await waitFor(() => {
     expect(container.querySelector('.codiff-markdown-preview')).not.toBeNull();
   });
+});
+
+test('selects review versions and loads one Evolution Unit into the Tree', async () => {
+  const baseSha = '0'.repeat(40) as GitSha;
+  const beforeSha = '1'.repeat(40) as GitSha;
+  const afterSha = '2'.repeat(40) as GitSha;
+  const unitId = 'unit-revised' as EvolutionUnitId;
+  const source = {
+    headSha: afterSha,
+    number: 42,
+    projectPath: 'example/repo',
+    provider: 'gitlab',
+    type: 'pull-request',
+    url: 'https://gitlab.example.com/example/repo/-/merge_requests/42',
+  } as const;
+  const versions = [
+    {
+      createdAt: '2026-08-03T12:00:00.000Z',
+      number: 1,
+      range: { base: revision(baseSha, 'Base'), head: revision(beforeSha, 'v1') },
+      versionId: 'version-1' as ReviewVersionOption['versionId'],
+    },
+    {
+      createdAt: '2026-08-04T12:00:00.000Z',
+      isHead: true,
+      number: 2,
+      previousCreatedAt: '2026-08-03T12:00:00.000Z',
+      previousNumber: 1,
+      range: { base: revision(baseSha, 'Base'), head: revision(afterSha, 'v2') },
+      versionId: 'version-2' as ReviewVersionOption['versionId'],
+    },
+  ] satisfies ReadonlyArray<ReviewVersionOption>;
+  const beforeCommit = {
+    authoredAt: '2026-08-03T12:00:00.000Z',
+    authorName: 'Author',
+    parentShas: [baseSha],
+    sha: beforeSha,
+    shortSha: beforeSha.slice(0, 8),
+    subject: 'Add behavior',
+  };
+  const afterCommit = {
+    ...beforeCommit,
+    authoredAt: '2026-08-04T12:00:00.000Z',
+    parentShas: [beforeSha],
+    sha: afterSha,
+    shortSha: afterSha.slice(0, 8),
+    subject: 'Refine behavior',
+  };
+  const evolution = {
+    recommendation: {
+      rationale: 'The commit changed intentionally.',
+      suggestedStructure: 'commit-evolution',
+    },
+    summary: {
+      absorbedIntoBase: 0,
+      added: 0,
+      ambiguous: 0,
+      completeCoverage: true,
+      pairingCoverage: 1,
+      removed: 0,
+      retained: 0,
+      reviewable: 1,
+      revised: 1,
+      rewrittenSamePatch: 0,
+      unreviewableAmbiguous: 0,
+    },
+    units: [
+      {
+        after: afterCommit,
+        before: beforeCommit,
+        confidence: 'high',
+        kind: 'revised',
+        order: 0,
+        reviewable: true,
+        unitId,
+      },
+    ],
+  } satisfies ReviewCommitEvolution;
+  const aggregateFile = createChangedFile('src/aggregate.ts');
+  const unitFile = createChangedFile('src/unit.ts');
+  const versionCompare = {
+    analysis: {
+      summary: {
+        addedLines: 1,
+        baseMoved: false,
+        commentsAffected: 0,
+        conflictFiles: 0,
+        deletedLines: 1,
+        empty: false,
+        filesChanged: 1,
+        intentionalFiles: 1,
+        noiseFiles: 0,
+      },
+    },
+    comparison: { after: versions[1].range, before: versions[0].range },
+    files: [aggregateFile],
+    from: versions[0],
+    to: versions[1],
+  } satisfies DiffComparisonView;
+  const snapshot = {
+    branch: 'feature',
+    codiffVersion: 'test',
+    exportedAt: '2026-08-04T12:00:00.000Z',
+    files: [aggregateFile],
+    kind: 'codiff-walkthrough-share',
+    preferences: {
+      codeFontFamily: 'Fira Code',
+      codeFontSize: 13,
+      diffStyle: 'split',
+      showWhitespace: false,
+      theme: 'system',
+      wordWrap: false,
+    },
+    repository: { root: '/repo', source },
+    version: 1,
+    walkthrough: {
+      agent: 'codex',
+      chapters: [],
+      focus: 'Review the comparison.',
+      generatedAt: '2026-08-04T12:00:00.000Z',
+      kind: 'narrative',
+      repo: { branch: 'feature', root: '/repo' },
+      source,
+      support: [],
+      title: 'Version comparison',
+      version: 4,
+    },
+  } satisfies SharedWalkthroughSnapshot;
+  const onLoadVersionCommitDiff = vi.fn(async () => [unitFile]);
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+
+  try {
+    sessionStorage.clear();
+    await act(async () => {
+      root.render(
+        <ReviewSurface
+          commits={[beforeCommit, afterCommit]}
+          initialMode="tree"
+          interactive={
+            {
+              onExitVersionCompare: () => {},
+              onGenerateWalkthrough: async () => {},
+              onHome: () => {},
+              onLoadVersionCommitDiff,
+              onOpenVersionCompare: () => {},
+              onSubmitComment: async () => {
+                throw new Error('Not used by this test.');
+              },
+              onSubmitGeneralComment: async () => {},
+              onSubmitReview: async () => ({ status: 'submitted', submittedDraftIds: [] }),
+              onUpdateComment: async () => {},
+              onUpdateGeneralComment: async () => {},
+              onVersionCompareRangeChange: () => {},
+              walkthroughStatus: 'ready',
+            } as never
+          }
+          snapshot={snapshot}
+          versionCommitEvolution={evolution}
+          versionCompare={versionCompare}
+          versionCompareEnabled
+          versionCompareFromVersionId={versions[0].versionId}
+          versionCompareToVersionId={versions[1].versionId}
+          versions={versions}
+        />,
+      );
+    });
+
+    expect(container.querySelector('.version-picker-pair')?.textContent).toContain('v1');
+    expect(container.querySelector('.version-picker-pair')?.textContent).toContain('v2');
+    const unitButton = [
+      ...container.querySelectorAll<HTMLButtonElement>('.version-commit-unit'),
+    ].find(({ textContent }) => textContent?.includes('Refine behavior'));
+    await act(async () => unitButton?.click());
+    await waitFor(() => expect(onLoadVersionCommitDiff).toHaveBeenCalledWith(unitId));
+    await waitFor(() => expect(container.textContent).toContain('src/unit.ts'));
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
 });

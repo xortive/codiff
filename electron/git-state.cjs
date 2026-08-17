@@ -35,8 +35,6 @@ const {
   createPullRequestHistoryFetchRefspecs,
   createPullRequestSource,
   getPullRequestHeadImageSource,
-  listPullRequestHistory,
-  normalizeGitHubPullRequestCommit,
   normalizeGitHubReviewComment,
   normalizePullRequestComment,
   parseGitHubPullRequestUrl,
@@ -53,7 +51,6 @@ const { createPullRequestSection } = require('./git-state/review-range-sections.
 const {
   createGitLabPosition,
   createMergeRequestFetchRefspecs,
-  listMergeRequestHistory,
   normalizeGitLabReviewComment,
   parseGitLabMergeRequestUrl,
   readMergeRequestImageContent,
@@ -63,6 +60,7 @@ const {
   submitMergeRequestComment,
   submitMergeRequestReview,
 } = require('./git-state/merge-request.cjs');
+const { listReviewRepositoryHistory } = require('./git-state/review-history.cjs');
 const { parseReviewUrl } = require('./review-source.cjs');
 const {
   readDiffSectionContent: readWorkingTreeDiffSectionContent,
@@ -187,11 +185,7 @@ const getBranchHistoryRef = (source) =>
 /** @param {string} launchPath @param {number} [limit] @param {ReviewSource} [source] @returns {Promise<RepositoryHistory>} */
 const readRepositoryHistory = (launchPath, limit, source) =>
   source?.type === 'pull-request'
-    ? (isGitLabReviewSource(source) ? listMergeRequestHistory : listPullRequestHistory)(
-        launchPath,
-        source,
-        limit,
-      )
+    ? listReviewRepositoryHistory(launchPath, source, limit)
     : listRepositoryHistory(
         launchPath,
         limit,
@@ -277,7 +271,6 @@ module.exports = {
   createPullRequestSource,
   getPullRequestHeadImageSource,
   listRepositoryHistory: readRepositoryHistory,
-  normalizeGitHubPullRequestCommit,
   normalizeGitHubReviewComment,
   normalizeGitLabReviewComment,
   normalizePullRequestComment,

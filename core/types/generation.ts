@@ -1,11 +1,23 @@
 import type {
+  DiffComparisonAnalysis,
   RepositoryState,
+  ReviewCommitUnit,
   ReviewCommitSummary,
   ReviewUnit,
   TargetComparisonReviewPlan,
   TargetComparisonReviewStructure,
+  VersionComparisonReviewPlan,
+  VersionComparisonReviewStructure,
 } from './review-history.ts';
-import type { DiffRange, GitSha, ResolvedReviewSource, ReviewSource } from './review-identity.ts';
+import type {
+  DiffComparison,
+  DiffRange,
+  EvolutionUnitId,
+  GitSha,
+  ResolvedReviewSource,
+  ReviewSource,
+  ReviewVersionId,
+} from './review-identity.ts';
 import type { NarrativeWalkthrough, PersistedWalkthrough } from './walkthrough.ts';
 
 export type GenerationSettings = Readonly<Record<string, boolean | number | string>>;
@@ -26,18 +38,31 @@ export type GenerationMetadata = {
   profile: GenerationProfile;
 };
 
-/** Top-level walkthrough authoring context for one Target Comparison. */
-export type WalkthroughGenerationInput = {
-  kind: 'range';
-  plan: TargetComparisonReviewPlan;
-  range: DiffRange;
-  /** Aggregate state for net-change review or later composition. */
-  state: RepositoryState;
-  unitStates?: ReadonlyArray<{
-    state: RepositoryState;
-    unit: ReviewUnit;
-  }>;
-};
+/** Top-level walkthrough authoring context for one resolved review relation. */
+export type WalkthroughGenerationInput =
+  | {
+      kind: 'range';
+      plan: TargetComparisonReviewPlan;
+      range: DiffRange;
+      /** Aggregate state for net-change review or later composition. */
+      state: RepositoryState;
+      unitStates?: ReadonlyArray<{
+        state: RepositoryState;
+        unit: ReviewCommitUnit;
+      }>;
+    }
+  | {
+      analysis: DiffComparisonAnalysis;
+      comparison: DiffComparison;
+      kind: 'comparison';
+      plan: VersionComparisonReviewPlan;
+      /** Aggregate state for Complete Comparison review. */
+      state?: RepositoryState;
+      unitStates?: ReadonlyArray<{
+        state: RepositoryState;
+        unit: Exclude<ReviewUnit, { kind: 'commit' }>;
+      }>;
+    };
 
 export type WalkthroughGenerationUnitProgress = {
   detail?: string;
@@ -81,11 +106,19 @@ export type NarrativeWalkthroughRequestOptions = {
 export type GenerateLocalReviewWalkthroughRequest = {
   commits: ReadonlyArray<ReviewCommitSummary>;
   force?: boolean;
-  selection: {
-    range: DiffRange;
-    relation: 'target-comparison';
-    structure: TargetComparisonReviewStructure;
-  };
+  regenerateUnitId?: EvolutionUnitId;
+  selection:
+    | {
+        range: DiffRange;
+        relation: 'target-comparison';
+        structure: TargetComparisonReviewStructure | 'auto';
+      }
+    | {
+        fromVersionId: ReviewVersionId;
+        relation: 'version-comparison';
+        structure: VersionComparisonReviewStructure | 'auto';
+        toVersionId: ReviewVersionId;
+      };
   source: Extract<ReviewSource, { type: 'pull-request' }>;
 };
 
@@ -100,7 +133,11 @@ export type GenerateLocalReviewWalkthroughResult =
       code?: 'CODEX_NOT_FOUND' | 'CLAUDE_NOT_FOUND' | 'OPENCODE_NOT_FOUND' | 'PI_NOT_FOUND';
       failures?: ReadonlyArray<{
         error: string;
-        identity: 'single' | { kind: 'commit'; sha: GitSha };
+        identity:
+          | 'review-focus'
+          | 'single'
+          | { kind: 'commit'; sha: GitSha }
+          | { kind: 'evolution-unit'; unitId: EvolutionUnitId };
         label: string;
       }>;
       reason: string;

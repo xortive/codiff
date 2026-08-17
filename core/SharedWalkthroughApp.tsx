@@ -143,6 +143,9 @@ import type {
   DiffImageContentRequest,
   DiffImageContentResult,
   DiffSection,
+  DiffComparisonBaseMovement,
+  DiffComparisonView,
+  EvolutionUnitId,
   GitSha,
   GitIdentity,
   HistoryEntry,
@@ -157,8 +160,13 @@ import type {
   ResolvedReviewSource,
   ReviewCommenting,
   ReviewContextResolver,
+  ReviewCommitEvolution,
   ReviewCommitListEntry,
   ReviewSource,
+  ReviewEvolutionUnit,
+  ReviewVersionEvolutionProgress,
+  ReviewVersionId,
+  ReviewVersionOption,
   RepositoryState,
   ShareCommentSubmission,
   SharedWalkthroughReviewScope,
@@ -195,6 +203,9 @@ const writeSharedSidebarWidth = (width: number) => {
 };
 
 export type ReviewWalkthroughStatus = 'failed' | 'generating' | 'idle' | 'ready';
+export type WalkthroughReviewStructure =
+  | TargetComparisonReviewStructure
+  | VersionComparisonReviewStructure;
 export type ReviewMode = 'comments' | 'history' | 'tree' | 'walkthrough';
 export type ReviewSurfaceCommandBridge = {
   copyPendingComments: () => string;
@@ -355,7 +366,8 @@ export type ReviewWalkthroughCapabilities = {
   generationProgress?: WalkthroughGenerationProgress | null;
   onGenerate?: (options?: {
     force?: boolean;
-    reviewStructure?: TargetComparisonReviewStructure;
+    regenerateUnitId?: EvolutionUnitId;
+    reviewStructure?: WalkthroughReviewStructure;
   }) => Promise<void> | void;
   onShare?: () => Promise<void> | void;
   progress?: ReactNode;
@@ -466,6 +478,261 @@ const disabledCommitMessage = async (): Promise<WalkthroughCommitMessageResult> 
   status: 'unavailable',
 });
 
+type VersionEvolutionUnit = Exclude<ReviewEvolutionUnit, { kind: 'commit' }>;
+
+const shortVersionAge = (value: string) => {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) {
+    return '—';
+  }
+  const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / (60 * 1000)));
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours}h`;
+  }
+  const days = Math.floor(hours / 24);
+  if (days < 14) {
+    return `${days}d`;
+  }
+  if (days < 60) {
+    return `${Math.floor(days / 7)}w`;
+  }
+  if (days < 365) {
+    return `${Math.floor(days / 30)}mo`;
+  }
+  return `${Math.floor(days / 365)}y`;
+};
+
+export const formatVersionElapsedDuration = (from: string, to: string) => {
+  const fromTimestamp = Date.parse(from);
+  const toTimestamp = Date.parse(to);
+  if (
+    !Number.isFinite(fromTimestamp) ||
+    !Number.isFinite(toTimestamp) ||
+    toTimestamp < fromTimestamp
+  ) {
+    return '—';
+  }
+  const minutes = Math.floor((toTimestamp - fromTimestamp) / (60 * 1000));
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours}h`;
+  }
+  const days = Math.floor(hours / 24);
+  if (days < 14) {
+    return `${days}d`;
+  }
+  if (days < 60) {
+    return `${Math.floor(days / 7)}w`;
+  }
+  if (days < 365) {
+    return `${Math.floor(days / 30)}mo`;
+  }
+  return `${Math.floor(days / 365)}y`;
+};
+
+const formatSignedBaseInterval = (delta: number | null) => {
+  if (delta == null) {
+    return null;
+  }
+  const duration = formatVersionElapsedDuration(
+    new Date(0).toISOString(),
+    new Date(Math.abs(delta)).toISOString(),
+  );
+  return `new base is ${duration} ${delta >= 0 ? 'newer' : 'older'}`;
+};
+
+const formatBaseMovementRelationship = (
+  relationship: DiffComparisonBaseMovement['relationship'],
+) => {
+  switch (relationship) {
+    case 'forward':
+      return 'fast-forward';
+    case 'backward':
+      return 'rewound';
+    case 'divergent':
+      return 'divergent histories';
+    default:
+      return 'relationship unknown';
+  }
+};
+
+const formatBaseMovementCommitCount = (
+  movement: Pick<DiffComparisonBaseMovement, 'commits' | 'commitsBetween' | 'truncated'>,
+) => {
+  const listed = movement.commits?.length ?? 0;
+  const count = movement.commitsBetween ?? (listed > 0 ? listed : null);
+  if (count == null) {
+    return 'Commit count unavailable';
+  }
+  const approximate = movement.truncated || (movement.commitsBetween == null && listed > 0);
+  return `${approximate ? '≈' : ''}${count} commit${count === 1 ? '' : 's'}`;
+};
+
+const VersionPicker = ({
+  endpoint,
+  label,
+  onChange,
+  otherId,
+  value,
+  versions,
+}: {
+  endpoint: 'from' | 'to';
+  label: string;
+  onChange: (id: ReviewVersionId) => void;
+  otherId: ReviewVersionId | null;
+  value: ReviewVersionId;
+  versions: ReadonlyArray<ReviewVersionOption>;
+}) => {
+  const selected = versions.find((version) => version.versionId === value);
+  return (
+    <Select.Root
+      modal={false}
+      onValueChange={(nextValue) => {
+        const nextVersion = versions.find((version) => version.versionId === nextValue);
+        if (nextVersion) {
+          onChange(nextVersion.versionId);
+        }
+      }}
+      value={value}
+    >
+      <div className="version-picker">
+        <span className="version-picker-label">{label}</span>
+        <Select.Trigger aria-label={`${label} version`} className="version-picker-trigger">
+          <Select.Value>
+            {() => <span>{selected ? versionOptionLabelText(selected) : 'Version'}</span>}
+          </Select.Value>
+          <Select.Icon aria-hidden>⌄</Select.Icon>
+        </Select.Trigger>
+      </div>
+      <Select.Portal>
+        <Select.Positioner
+          align="start"
+          className="version-picker-positioner"
+          side="bottom"
+          sideOffset={4}
+        >
+          <Select.Popup aria-label={`${label} version options`} className="version-picker-popover">
+            <Select.List>
+              {versions.map((version, optionIndex) => {
+                const otherIndex = versions.findIndex(
+                  (candidate) => candidate.versionId === otherId,
+                );
+                const disabled =
+                  Boolean(version.unavailableReason) ||
+                  (otherIndex >= 0 &&
+                    (endpoint === 'from' ? optionIndex >= otherIndex : optionIndex <= otherIndex));
+                const stat = version.diffStat;
+                const headSha = versionOptionHeadSha(version);
+                const age = version.number === 0 ? null : shortVersionAge(version.createdAt);
+                const elapsed =
+                  version.previousCreatedAt && version.previousNumber != null
+                    ? formatVersionElapsedDuration(version.previousCreatedAt, version.createdAt)
+                    : null;
+                const timing = [
+                  age ? `${age} old` : null,
+                  elapsed ? `${elapsed} since v${version.previousNumber}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ');
+                return (
+                  <Select.Item
+                    className="version-picker-option"
+                    disabled={disabled}
+                    key={version.versionId}
+                    label={`${versionOptionLabelText(version)} ${headSha}`}
+                    title={
+                      version.unavailableReason ?? new Date(version.createdAt).toLocaleString()
+                    }
+                    value={version.versionId}
+                  >
+                    <span>{versionOptionLabelText(version)}</span>
+                    <span className="version-picker-head">{version.isHead ? 'HEAD' : ''}</span>
+                    {version.number === 0 ? (
+                      <code>base</code>
+                    ) : (
+                      <CommitRefTooltip
+                        commit={{
+                          additions: stat?.additions,
+                          authoredAt: version.createdAt,
+                          deletions: stat?.deletions,
+                          sha: headSha,
+                          shortSha: headSha.slice(0, 7),
+                          subject: `${versionOptionLabelText(version)} head`,
+                          webUrl: version.range.head.label.url,
+                        }}
+                        linkTrigger={false}
+                      />
+                    )}
+                    <span className="version-picker-additions">
+                      {version.number === 0 ? '' : `+${stat?.additions ?? '…'}`}
+                    </span>
+                    <span className="version-picker-deletions">
+                      {version.number === 0 ? '' : `−${stat?.deletions ?? '…'}`}
+                    </span>
+                    <span>
+                      {version.number === 0
+                        ? ''
+                        : `${stat?.filesChanged ?? '…'} ${stat?.filesChanged === 1 ? 'file' : 'files'}`}
+                    </span>
+                    <span className="version-picker-timing">
+                      {version.number === 0 ? 'MR base' : timing || '—'}
+                    </span>
+                    {version.activity?.reasons.length ? (
+                      <span
+                        className="version-review-activity-pill"
+                        title={version.activity.reasons
+                          .map(
+                            (reason) =>
+                              `${reason.kind} · ${new Date(reason.occurredAt).toLocaleString()}`,
+                          )
+                          .join('\n')}
+                      >
+                        Review activity
+                      </span>
+                    ) : null}
+                  </Select.Item>
+                );
+              })}
+            </Select.List>
+          </Select.Popup>
+        </Select.Positioner>
+      </Select.Portal>
+    </Select.Root>
+  );
+};
+
+function VersionComparisonEndpoint({ version }: { version?: ReviewVersionOption | null }) {
+  if (!version) {
+    return <span>Version</span>;
+  }
+  const label = versionOptionLabelText(version);
+  const headSha = versionOptionHeadSha(version);
+  return (
+    <span className="version-comparison-endpoint">
+      <span>{label}</span>
+      <CommitRefTooltip
+        commit={{
+          additions: version.diffStat?.additions,
+          authoredAt: version.createdAt,
+          deletions: version.diffStat?.deletions,
+          sha: headSha,
+          shortSha: headSha.slice(0, 7),
+          subject: `${label} head`,
+          webUrl: version.range.head.label.url,
+        }}
+        linkTrigger={false}
+      />
+    </span>
+  );
+}
+
 type ReviewSurfaceBaseProps = {
   capabilities?: ReviewSurfaceCapabilities;
   externalUrl?: string;
@@ -474,6 +741,18 @@ type ReviewSurfaceBaseProps = {
   onCommandBridgeChange?: (bridge: ReviewSurfaceCommandBridge | null) => void;
   onDeleteShare?: () => Promise<void> | void;
   pendingAssessmentThreadIds?: ReadonlySet<string>;
+  reviewVersions?: ReadonlyArray<ReviewVersionOption>;
+  reviewVersionsLoading?: boolean;
+  reviewVersionWarning?: string | null;
+  versionCompare?: DiffComparisonView | null;
+  versionCompareError?: string | null;
+  versionCompareFromVersionId?: ReviewVersionId | null;
+  versionCompareLoading?: boolean;
+  versionCompareToVersionId?: ReviewVersionId | null;
+  versionCommitEvolution?: ReviewCommitEvolution | null;
+  versionCommitEvolutionError?: string | null;
+  versionCommitEvolutionLoading?: boolean;
+  versionCommitEvolutionProgress?: ReviewVersionEvolutionProgress | null;
   providerLabel?: string;
   repositoryUrl?: string;
   settingsBar?: ReactNode;

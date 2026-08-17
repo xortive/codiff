@@ -27,6 +27,11 @@ import {
 } from '../lib/review-comments.ts';
 import { getFileReviewIdentity } from '../lib/review-identity.ts';
 import { orderReviewCommitStack, reviewCommitRange } from '../lib/review-commit-stack.ts';
+import {
+  suggestReviewComparison,
+  versionOptionHeadSha,
+  versionOptionLabelText,
+} from '../lib/review-history.ts';
 import { getSelectedPathFromScroll } from '../lib/review-scroll.ts';
 import { classifyTargetComparisonReviewStructure } from '../lib/review-strategy.ts';
 import {
@@ -61,6 +66,8 @@ import type {
   CodiffLaunchOptions,
   CodiffPreferences,
   CodiffUpdateStatus,
+  DiffComparisonView,
+  EvolutionUnitId,
   GitSha,
   GitIdentity,
   HistoryEntry,
@@ -68,8 +75,12 @@ import type {
   NarrativeWalkthroughResult,
   OpenReviewSourceKind,
   RepositoryState,
+  ReviewCommitEvolution,
   ReviewCommitListEntry,
   ReviewSource,
+  ReviewVersionEvolutionProgress,
+  ReviewVersionId,
+  ReviewVersionOption,
   DiffImageContentRequest,
   DiffImageContentResult,
   TargetComparisonReviewStructure,
@@ -298,6 +309,27 @@ export function RepositoryReviewHost({
   const [historyHasMore, setHistoryHasMore] = useState(initialHistory.length >= HISTORY_PAGE_SIZE);
   const [historyLimit, setHistoryLimit] = useState(HISTORY_PAGE_SIZE);
   const [historyLoading, setHistoryLoading] = useState(initialHistoryLoading);
+  const [reviewVersions, setReviewVersions] = useState<ReadonlyArray<ReviewVersionOption>>([]);
+  const [reviewVersionsLoading, setReviewVersionsLoading] = useState(
+    initialState.source.type === 'pull-request',
+  );
+  const [reviewVersionWarning, setReviewVersionWarning] = useState<string | null>(null);
+  const [versionCompare, setVersionCompare] = useState<DiffComparisonView | null>(null);
+  const [versionCompareLoading, setVersionCompareLoading] = useState(false);
+  const [versionCompareError, setVersionCompareError] = useState<string | null>(null);
+  const [versionCompareFromVersionId, setVersionCompareFromVersionId] =
+    useState<ReviewVersionId | null>(null);
+  const [versionCompareToVersionId, setVersionCompareToVersionId] =
+    useState<ReviewVersionId | null>(null);
+  const [versionCommitEvolution, setVersionCommitEvolution] =
+    useState<ReviewCommitEvolution | null>(null);
+  const [versionCommitEvolutionError, setVersionCommitEvolutionError] = useState<string | null>(
+    null,
+  );
+  const [versionCommitEvolutionLoading, setVersionCommitEvolutionLoading] = useState(false);
+  const [versionCommitEvolutionProgress, setVersionCommitEvolutionProgress] =
+    useState<ReviewVersionEvolutionProgress | null>(null);
+  const [firstUsableReviewReady, setFirstUsableReviewReady] = useState(false);
   const [initialHistoryComplete, setInitialHistoryComplete] = useState(!initialHistoryLoading);
   const [historySource, setHistorySource] = useState<ReviewSource | null>(() =>
     initialHistorySource === undefined
@@ -1501,6 +1533,262 @@ export function RepositoryReviewHost({
     [commandBarCommands],
   );
 
+  useEffect(() => {
+    const source = state?.source;
+    if (!source || source.type !== 'pull-request') {
+      return;
+    }
+    let canceled = false;
+    queueMicrotask(() => {
+      if (!canceled) {
+        setReviewVersionsLoading(true);
+      }
+    });
+    const versionsRequest = window.codiff.getReviewVersions({ includeActivity: false, source });
+    versionsRequest.then(
+      (result) => {
+        if (!canceled) {
+          setReviewVersions(result.versions);
+          setReviewVersionWarning(result.warning ?? null);
+          setReviewVersionsLoading(false);
+        }
+      },
+      (error: unknown) => {
+        if (!canceled) {
+          setReviewVersions([]);
+          setReviewVersionWarning(error instanceof Error ? error.message : String(error));
+          setReviewVersionsLoading(false);
+        }
+      },
+    );
+    return () => {
+      canceled = true;
+    };
+  }, [state?.source]);
+
+  useEffect(() => {
+    const source = state?.source;
+    if (
+      !source ||
+      source.type !== 'pull-request' ||
+      !firstUsableReviewReady ||
+      reviewVersionsLoading
+    ) {
+      return;
+    }
+    const sourceKey = getSourceKey(source);
+    let canceled = false;
+    void window.codiff.getReviewVersions({ includeActivity: true, source }).then(
+      (result) => {
+        if (canceled || !stateRef.current || getSourceKey(stateRef.current.source) !== sourceKey) {
+          return;
+        }
+        const enrichedVersions = new Map(
+          result.versions.map((version) => [version.versionId, version] as const),
+        );
+        setReviewVersions((current) =>
+          current.map((version) => {
+            const enriched = enrichedVersions.get(version.versionId);
+            return enriched?.activity ? { ...version, activity: enriched.activity } : version;
+          }),
+        );
+        if (result.warning) {
+          setReviewVersionWarning((current) => [current, result.warning].filter(Boolean).join(' '));
+        }
+      },
+      (error: unknown) => {
+        if (!canceled) {
+          const message = error instanceof Error ? error.message : String(error);
+          setReviewVersionWarning((current) =>
+            [current, `Reviewer activity unavailable: ${message}`].filter(Boolean).join(' '),
+          );
+        }
+      },
+    );
+    return () => {
+      canceled = true;
+    };
+  }, [firstUsableReviewReady, reviewVersionsLoading, state?.source]);
+
+  useEffect(
+    () =>
+      window.codiff.onReviewVersionEvolutionProgress(({ progress, requestId }) => {
+        if (versionEvolutionRequestIdRef.current === requestId) {
+          setVersionCommitEvolutionProgress(progress);
+        }
+      }),
+    [],
+  );
+
+  useEffect(
+    () => () => {
+      const requestId = versionEvolutionRequestIdRef.current;
+      if (requestId) {
+        void window.codiff.cancelReviewVersionEvolution(requestId);
+      }
+    },
+    [],
+  );
+
+  const loadVersionCompare = useCallback(
+    async (fromVersionId: ReviewVersionId, toVersionId: ReviewVersionId) => {
+      const current = stateRef.current;
+      if (current?.source.type !== 'pull-request' || fromVersionId === toVersionId) {
+        return;
+      }
+
+      const request = ++versionCompareRequestRef.current;
+      const previousEvolutionRequestId = versionEvolutionRequestIdRef.current;
+      if (previousEvolutionRequestId) {
+        void window.codiff.cancelReviewVersionEvolution(previousEvolutionRequestId);
+      }
+      const evolutionRequestId = `review-evolution-${crypto.randomUUID()}`;
+      versionEvolutionRequestIdRef.current = evolutionRequestId;
+      setVersionCompareFromVersionId(fromVersionId);
+      setVersionCompareToVersionId(toVersionId);
+      setVersionCompareError(null);
+      setVersionCompareLoading(true);
+      setVersionCommitEvolution(null);
+      setVersionCommitEvolutionError(null);
+      setVersionCommitEvolutionLoading(true);
+      setVersionCommitEvolutionProgress({
+        message: 'Reading previous and current commit stacks',
+        phase: 'reading-stacks',
+      });
+
+      const comparisonRequest = {
+        fromVersionId,
+        requestId: evolutionRequestId,
+        source: current.source,
+        toVersionId,
+      };
+      const evolutionPromise = window.codiff.getReviewVersionEvolution(comparisonRequest).then(
+        (result) => ({ result }),
+        (error: unknown) => ({ error }),
+      );
+
+      try {
+        const result = await window.codiff.getReviewVersionAggregate(comparisonRequest);
+        if (request !== versionCompareRequestRef.current) {
+          return;
+        }
+        setVersionCompare(result.versionCompare);
+        setVersionCompareFromVersionId(result.versionCompare.from.versionId);
+        setVersionCompareToVersionId(result.versionCompare.to.versionId);
+        if (result.warning) {
+          setReviewVersionWarning(result.warning);
+        }
+      } catch (error: unknown) {
+        if (request !== versionCompareRequestRef.current) {
+          return;
+        }
+        setVersionCompare(null);
+        setVersionCompareError(error instanceof Error ? error.message : String(error));
+      } finally {
+        if (request === versionCompareRequestRef.current) {
+          setVersionCompareLoading(false);
+        }
+      }
+
+      try {
+        const outcome = await evolutionPromise;
+        if ('error' in outcome) {
+          throw outcome.error;
+        }
+        if (request !== versionCompareRequestRef.current) {
+          return;
+        }
+        setVersionCommitEvolution(outcome.result.versionCommitEvolution);
+        if (outcome.result.warning) {
+          setReviewVersionWarning(outcome.result.warning);
+        }
+      } catch (error: unknown) {
+        if (request !== versionCompareRequestRef.current) {
+          return;
+        }
+        setVersionCommitEvolution(null);
+        setVersionCommitEvolutionError(error instanceof Error ? error.message : String(error));
+      } finally {
+        if (request === versionCompareRequestRef.current) {
+          setVersionCommitEvolutionLoading(false);
+          setVersionCommitEvolutionProgress(null);
+          if (versionEvolutionRequestIdRef.current === evolutionRequestId) {
+            versionEvolutionRequestIdRef.current = null;
+          }
+        }
+      }
+    },
+    [],
+  );
+
+  const openVersionCompare = useCallback(() => {
+    const suggested = suggestReviewComparison(reviewVersions);
+    if (suggested) {
+      void loadVersionCompare(suggested.fromVersionId, suggested.toVersionId);
+    }
+  }, [loadVersionCompare, reviewVersions]);
+
+  const exitVersionCompare = useCallback(() => {
+    versionCompareRequestRef.current += 1;
+    const evolutionRequestId = versionEvolutionRequestIdRef.current;
+    if (evolutionRequestId) {
+      void window.codiff.cancelReviewVersionEvolution(evolutionRequestId);
+      versionEvolutionRequestIdRef.current = null;
+    }
+    setVersionCompare(null);
+    setVersionCompareFromVersionId(null);
+    setVersionCompareToVersionId(null);
+    setVersionCompareError(null);
+    setVersionCompareLoading(false);
+    setVersionCommitEvolution(null);
+    setVersionCommitEvolutionError(null);
+    setVersionCommitEvolutionLoading(false);
+    setVersionCommitEvolutionProgress(null);
+  }, []);
+
+  const loadVersionUnitDiff = useCallback(
+    async (unitId: EvolutionUnitId) => {
+      const current = stateRef.current;
+      if (current?.source.type !== 'pull-request') {
+        return [];
+      }
+      const unit = versionCommitEvolution?.units.find(
+        (candidate) => candidate.kind !== 'commit' && candidate.unitId === unitId,
+      );
+      if (!unit) {
+        throw new Error(`Unknown Evolution Unit: ${unitId}`);
+      }
+      return window.codiff.getReviewVersionUnitDiff({ source: current.source, unit });
+    },
+    [versionCommitEvolution],
+  );
+
+  const updateSelectedPathFromScroll = useCallback(
+    (viewer: CodeViewInstance) => {
+      const nextPath = getSelectedPathFromScroll(viewer, visibleFiles, showWhitespace);
+      if (!nextPath) {
+        return;
+      }
+
+      const programmaticScrollPath = programmaticScrollPathRef.current;
+      if (programmaticScrollPath && nextPath !== programmaticScrollPath) {
+        return;
+      }
+
+      if (programmaticScrollPath) {
+        programmaticScrollPathRef.current = null;
+        if (programmaticScrollTimerRef.current != null) {
+          window.clearTimeout(programmaticScrollTimerRef.current);
+          programmaticScrollTimerRef.current = null;
+        }
+      }
+
+      setSelectedPath((current) => (current === nextPath ? current : nextPath));
+    },
+    [setSelectedPath, showWhitespace, visibleFiles],
+  );
+
+
   if (loadError) {
     return (
       <main className="empty-state">
@@ -1852,6 +2140,18 @@ export function RepositoryReviewHost({
         source.type === 'pull-request' && source.provider === 'gitlab' ? 'GitLab' : 'GitHub'
       }
       pendingAssessmentThreadIds={pendingAssessmentThreadIds}
+      reviewVersions={reviewVersions}
+      reviewVersionsLoading={reviewVersionsLoading}
+      reviewVersionWarning={reviewVersionWarning}
+      versionCompare={versionCompare}
+      versionCompareError={versionCompareError}
+      versionCompareFromVersionId={versionCompareFromVersionId}
+      versionCompareLoading={versionCompareLoading}
+      versionCompareToVersionId={versionCompareToVersionId}
+      versionCommitEvolution={versionCommitEvolution}
+      versionCommitEvolutionError={versionCommitEvolutionError}
+      versionCommitEvolutionLoading={versionCommitEvolutionLoading}
+      versionCommitEvolutionProgress={versionCommitEvolutionProgress}
       snapshot={snapshot}
       title={title}
     />
