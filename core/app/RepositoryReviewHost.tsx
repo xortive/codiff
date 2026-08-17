@@ -26,7 +26,17 @@ import {
   toPullRequestExistingReviewComment,
 } from '../lib/review-comments.ts';
 import { getFileReviewIdentity } from '../lib/review-identity.ts';
+import { orderReviewCommitStack, reviewCommitRange } from '../lib/review-commit-stack.ts';
+import { getSelectedPathFromScroll } from '../lib/review-scroll.ts';
+import { classifyTargetComparisonReviewStructure } from '../lib/review-strategy.ts';
 import {
+  SIDEBAR_COLLAPSE_THRESHOLD,
+  readSidebarWidth,
+  writeSidebarWidth,
+} from '../lib/sidebar-width.ts';
+import {
+  getEmptySourceDetail,
+  getEmptySourceTitle,
   getHistorySource,
   getRefreshSource,
   getRepositoryLoadError,
@@ -51,15 +61,18 @@ import type {
   CodiffLaunchOptions,
   CodiffPreferences,
   CodiffUpdateStatus,
+  GitSha,
   GitIdentity,
   HistoryEntry,
   NarrativeWalkthrough,
   NarrativeWalkthroughResult,
   OpenReviewSourceKind,
   RepositoryState,
+  ReviewCommitListEntry,
   ReviewSource,
   DiffImageContentRequest,
   DiffImageContentResult,
+  TargetComparisonReviewStructure,
   DiffSection,
   DiffSectionContentRequest,
 } from '../types.ts';
@@ -130,6 +143,34 @@ const toPullRequestReviewEvent = (
     case 'request-changes':
       return 'REQUEST_CHANGES';
   }
+};
+
+export const toMergeRequestCommit = (entry: HistoryEntry): ReviewCommitListEntry => ({
+  authoredAt: new Date(entry.committedAt).toISOString(),
+  authorName: entry.author,
+  ...(entry.diffStat ? { diffStat: entry.diffStat } : {}),
+  parentShas: entry.parentShas,
+  sha: entry.sha,
+  shortSha: entry.sha.slice(0, 8),
+  subject: entry.subject,
+});
+export const toMergeRequestCommits = (
+  entries: ReadonlyArray<HistoryEntry>,
+): ReadonlyArray<ReviewCommitListEntry> =>
+  orderReviewCommitStack(entries.filter((entry) => entry.scope !== 'base')).map(
+    toMergeRequestCommit,
+  );
+
+const getTargetBaseSha = (state: RepositoryState): GitSha | null => {
+  for (const file of state.files) {
+    for (const section of file.sections) {
+      const base = section.range?.base;
+      if (base && 'sha' in base) {
+        return base.sha;
+      }
+    }
+  }
+  return null;
 };
 
 const projectReleasedWalkthroughSource = (
@@ -1489,9 +1530,33 @@ export function RepositoryReviewHost({
         ? 'failed'
         : 'idle';
   const walkthroughAgent = launchOptions.agentBackend ?? config.settings.agentBackend;
+  const reviewCommits = toMergeRequestCommits(historyEntries);
+  const reviewClassification = classifyTargetComparisonReviewStructure({
+    commits: reviewCommits.map((commit) => ({
+      authoredAt: commit.authoredAt,
+      authorName: commit.authorName,
+      message: commit.subject,
+      parentShas: commit.parentShas,
+      sha: commit.sha,
+      shortSha: commit.shortSha,
+      title: commit.subject,
+      ...(commit.webUrl ? { webUrl: commit.webUrl } : {}),
+    })),
+    description: source.type === 'pull-request' ? source.description : undefined,
+    title: source.type === 'pull-request' ? source.title : title,
+  });
+  const targetBaseSha = getTargetBaseSha(state);
+  const targetBaseEntry = targetBaseSha
+    ? historyEntries.find((entry) => entry.scope === 'base' && entry.sha === targetBaseSha)
+    : undefined;
   const snapshot = {
     ...buildSharedReviewSnapshot({
       preferences,
+      reviewStructure:
+        narrativeWalkthrough?.structure === 'commit-by-commit' ||
+        narrativeWalkthrough?.structure === 'net-change'
+          ? narrativeWalkthrough.structure
+          : reviewClassification.structure,
       state,
       title,
       walkthrough:
@@ -1701,6 +1766,24 @@ export function RepositoryReviewHost({
             value: preferences.wordWrap,
           },
         },
+        ...(source.type === 'pull-request' && reviewCommits.length > 0
+          ? {
+              treeCommit: {
+                commits: reviewCommits,
+                onLoadCommitRangeDiff: async (fromSha, toSha) => {
+                  const range = reviewCommitRange(reviewCommits, fromSha, toSha);
+                  const rangeState = await window.codiff.getRepositoryState({
+                    base: range.baseSha,
+                    head: range.headSha,
+                    symmetric: false,
+                    type: 'range',
+                  });
+                  return sortFiles(rangeState.files);
+                },
+                targetBaseCommit: targetBaseEntry ? toMergeRequestCommit(targetBaseEntry) : null,
+              },
+            }
+          : {}),
         walkthrough: {
           ...(isLocalCommitSource
             ? {
@@ -1711,7 +1794,43 @@ export function RepositoryReviewHost({
             : {}),
           error: walkthroughError,
           generationProgress: walkthroughProgress.generation,
-          onGenerate: () => loadNarrativeWalkthrough(source),
+          onGenerate: async (options) => {
+            if (source.type !== 'pull-request') {
+              await loadNarrativeWalkthrough(source, options);
+              return;
+            }
+            const range = state.files
+              .flatMap((file) => file.sections)
+              .find((section) => section.range)?.range;
+            if (!range) {
+              throw new Error('The pull request diff does not expose an immutable review range.');
+            }
+            const result = await window.codiff.generateReviewWalkthrough({
+              commits: reviewCommits.filter((commit) => commit.parentShas.length <= 1),
+              ...(options?.force ? { force: true } : {}),
+              selection: {
+                range,
+                relation: 'target-comparison',
+                structure: options?.reviewStructure ?? reviewClassification.structure,
+              },
+              source,
+            });
+            if (result.status === 'ready') {
+              applyNarrativeWalkthroughResult({
+                cacheKey: result.cacheKey,
+                pendingAssessmentThreadIds: result.pendingAssessmentThreadIds,
+                status: 'ready',
+                walkthrough: result.walkthrough,
+              });
+              return;
+            }
+            setNarrativeWalkthrough(null);
+            setWalkthroughError({
+              ...(result.code ? { code: result.code } : {}),
+              reason: result.reason,
+              status: 'unavailable',
+            });
+          },
           onShare: enabledShareWalkthrough,
           progress: (
             <WalkthroughProgress

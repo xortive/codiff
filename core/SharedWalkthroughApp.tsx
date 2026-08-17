@@ -18,6 +18,8 @@ import {
 } from 'react';
 import { Button } from './app/components/Button.tsx';
 import { CommandBar } from './app/components/CommandBar.tsx';
+import { ReviewCommitRef } from './app/components/CommitRefTooltip.tsx';
+import { CommitScopePanel } from './app/components/CommitScopePanel.tsx';
 import { ReviewFileTree } from './app/components/FileTree.tsx';
 import { KeyboardShortcutsHelp } from './app/components/KeyboardShortcutsHelp.tsx';
 import {
@@ -141,6 +143,7 @@ import type {
   DiffImageContentRequest,
   DiffImageContentResult,
   DiffSection,
+  GitSha,
   GitIdentity,
   HistoryEntry,
   NarrativeWalkthrough,
@@ -154,12 +157,15 @@ import type {
   ResolvedReviewSource,
   ReviewCommenting,
   ReviewContextResolver,
+  ReviewCommitListEntry,
   ReviewSource,
   RepositoryState,
   ShareCommentSubmission,
+  SharedWalkthroughReviewScope,
   SharedWalkthroughSnapshot,
   SubmittedReviewComment,
   SubmitPullRequestReviewResult,
+  TargetComparisonReviewStructure,
   WalkthroughCommitMessageResult,
   WalkthroughCommitResult,
   WalkthroughGenerationProgress,
@@ -314,6 +320,15 @@ export type ReviewHistoryModel = {
   pullRequestSource?: Extract<ReviewSource, { type: 'pull-request' }> | null;
 };
 
+export type ReviewTreeCommitCapabilities = {
+  commits: ReadonlyArray<ReviewCommitListEntry>;
+  onLoadCommitRangeDiff: (
+    fromSha: GitSha,
+    toSha: GitSha,
+  ) => Promise<ReadonlyArray<ChangedFile>> | ReadonlyArray<ChangedFile>;
+  targetBaseCommit?: ReviewCommitListEntry | null;
+};
+
 export type ControlledReviewPreferences = {
   diffLayout?: ControlledReviewValue<CodiffDiffStyle>;
   outdatedVisibility?: ControlledReviewValue<boolean>;
@@ -338,7 +353,10 @@ export type ReviewWalkthroughCapabilities = {
   commitOutput?: CommitOutputSubscriber;
   error?: Pick<WalkthroughError, 'code' | 'reason'> | null;
   generationProgress?: WalkthroughGenerationProgress | null;
-  onGenerate?: () => Promise<void> | void;
+  onGenerate?: (options?: {
+    force?: boolean;
+    reviewStructure?: TargetComparisonReviewStructure;
+  }) => Promise<void> | void;
   onShare?: () => Promise<void> | void;
   progress?: ReactNode;
   status?: ReviewWalkthroughStatus;
@@ -366,16 +384,19 @@ export type ReviewSurfaceCapabilities = ReviewAnnotationCapabilities & {
   history?: ReviewHistoryModel;
   preferences?: ControlledReviewPreferences;
   sourceNavigation?: ReviewSourceNavigation;
+  treeCommit?: ReviewTreeCommitCapabilities;
   walkthrough?: ReviewWalkthroughCapabilities;
 };
 
 export const buildSharedReviewSnapshot = ({
   preferences,
+  reviewStructure,
   state,
   title,
   walkthrough,
 }: {
   preferences: SharedWalkthroughSnapshot['preferences'];
+  reviewStructure?: SharedWalkthroughReviewScope['structure'];
   state: RepositoryState;
   title: string;
   walkthrough: PersistedWalkthrough;
@@ -395,6 +416,7 @@ export const buildSharedReviewSnapshot = ({
     title,
   },
   reviewComments: state.reviewComments,
+  reviewScope: { kind: 'merge-request', structure: reviewStructure ?? 'net-change' },
   version: 1,
   walkthrough,
 });
@@ -458,6 +480,7 @@ type ReviewSurfaceBaseProps = {
   signInLabel?: string;
   snapshot: SharedWalkthroughSnapshot;
   sourceDescriptionFooterAside?: ReactNode;
+  targetBaseCommit?: ReviewCommitListEntry | null;
   title?: string;
 };
 
@@ -489,6 +512,7 @@ export function ReviewSurface({
   signInLabel = 'Sign in to comment',
   snapshot,
   sourceDescriptionFooterAside,
+  targetBaseCommit = null,
   title,
 }: ReviewSurfaceProps) {
   const content = capabilities?.content;
@@ -582,6 +606,14 @@ export function ReviewSurface({
   const [treeScrollTarget, setTreeScrollTarget] = useState<ReviewScrollTarget | null>(
     () => content?.initialScrollTarget ?? null,
   );
+  const [selectedTreeCommitRange, setSelectedTreeCommitRange] = useState<{
+    fromSha: GitSha;
+    toSha: GitSha;
+  } | null>(null);
+  const [treeCommitFiles, setTreeCommitFiles] = useState<ReadonlyArray<ChangedFile> | null>(null);
+  const [treeCommitDiffError, setTreeCommitDiffError] = useState<string | null>(null);
+  const [treeCommitDiffLoading, setTreeCommitDiffLoading] = useState(false);
+  const treeCommitLoadRequestRef = useRef(0);
   const {
     bumpItemVersion,
     collapsed,
@@ -602,6 +634,65 @@ export function ReviewSurface({
   });
   const itemVersionByKey = content?.itemVersionByKey ?? uncontrolledItemVersionByKey;
   const selectedPath = controlledPreferences?.selectedPath?.value ?? uncontrolledSelectedPath;
+  const setSelectedPath = controlledPreferences?.selectedPath?.onChange ?? setUncontrolledSelectedPath;
+  const commits = capabilities?.treeCommit?.commits ?? [];
+  const targetBaseCommit = capabilities?.treeCommit?.targetBaseCommit ?? null;
+  const loadCommitRangeDiff = capabilities?.treeCommit?.onLoadCommitRangeDiff;
+  const clearTreeCommitRange = useCallback(() => {
+    treeCommitLoadRequestRef.current += 1;
+    setSelectedTreeCommitRange(null);
+    setTreeCommitFiles(null);
+    setTreeCommitDiffError(null);
+    setTreeCommitDiffLoading(false);
+    setSelectedPath(snapshot.files[0]?.path ?? null);
+  }, [setSelectedPath, snapshot.files]);
+  const sourceKey = getSourceKey(snapshot.repository.source);
+  const previousSourceKeyRef = useRef(sourceKey);
+  useEffect(() => {
+    if (previousSourceKeyRef.current === sourceKey) {
+      return;
+    }
+    previousSourceKeyRef.current = sourceKey;
+    clearTreeCommitRange();
+  }, [clearTreeCommitRange, sourceKey]);
+  useEffect(() => {
+    if (sidebarMode !== 'tree' || selectedTreeCommitRange == null || !loadCommitRangeDiff) {
+      return;
+    }
+    const { fromSha, toSha } = selectedTreeCommitRange;
+    const requestId = treeCommitLoadRequestRef.current + 1;
+    treeCommitLoadRequestRef.current = requestId;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled || treeCommitLoadRequestRef.current !== requestId) {
+        return;
+      }
+      setTreeCommitDiffLoading(true);
+      setTreeCommitDiffError(null);
+      setTreeCommitFiles(null);
+    });
+    void Promise.resolve(loadCommitRangeDiff(fromSha, toSha))
+      .then((files) => {
+        if (cancelled || treeCommitLoadRequestRef.current !== requestId) {
+          return;
+        }
+        setTreeCommitFiles(files);
+        setSelectedPath(files[0]?.path ?? null);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled && treeCommitLoadRequestRef.current === requestId) {
+          setTreeCommitDiffError(error instanceof Error ? error.message : String(error));
+        }
+      })
+      .finally(() => {
+        if (!cancelled && treeCommitLoadRequestRef.current === requestId) {
+          setTreeCommitDiffLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadCommitRangeDiff, selectedTreeCommitRange, setSelectedPath, sidebarMode]);
   const { resizeSidebar, sidebarWidth } = useResizableSidebar({
     collapseThreshold: SIDEBAR_COLLAPSE_THRESHOLD,
     onCollapse: () => setSidebarCollapsed(true),
@@ -847,10 +938,21 @@ export function ReviewSurface({
   const [pullRequestMergeSubmitting, setPullRequestMergeSubmitting] = useState(false);
   const [walkthroughRequestPending, setWalkthroughRequestPending] = useState(false);
   const walkthroughRequestPendingRef = useRef(false);
+  const walkthroughGenerationOptionsRef = useRef<{
+    force?: boolean;
+    reviewStructure?: TargetComparisonReviewStructure;
+  } | null>(null);
   const [walkthroughRequestId, setWalkthroughRequestId] = useState(0);
   const walkthroughRef = useRef(walkthrough);
 
-  const orderedFiles = useMemo(() => sortFiles(snapshot.files), [snapshot.files]);
+  const reviewFiles = useMemo(
+    () =>
+      sidebarMode === 'tree' && selectedTreeCommitRange != null
+        ? (treeCommitFiles ?? [])
+        : snapshot.files,
+    [selectedTreeCommitRange, sidebarMode, snapshot.files, treeCommitFiles],
+  );
+  const orderedFiles = useMemo(() => sortFiles(reviewFiles), [reviewFiles]);
   const {
     activeMatch: activeDiffSearchMatch,
     activeMatchIndex: activeDiffSearchMatchIndex,
@@ -953,13 +1055,16 @@ export function ReviewSurface({
 
   const changeSidebarMode = useCallback(
     (mode: ReviewMode) => {
+      if (mode !== 'tree') {
+        clearTreeCommitRange();
+      }
       if (activeMode) {
         activeMode.onChange(mode);
       } else {
         setUncontrolledSidebarMode(mode);
       }
     },
-    [activeMode],
+    [activeMode, clearTreeCommitRange],
   );
   const askReviewAssistant = useCallback(
     (comment: ReviewComment) => {
@@ -1307,7 +1412,9 @@ export function ReviewSurface({
     }
 
     let cancelled = false;
-    void Promise.resolve(walkthroughRef.current?.onGenerate?.())
+    const options = walkthroughGenerationOptionsRef.current;
+    walkthroughGenerationOptionsRef.current = null;
+    void Promise.resolve(walkthroughRef.current?.onGenerate?.(options ?? undefined))
       .catch(() => {})
       .finally(() => {
         if (cancelled) {
@@ -1321,19 +1428,23 @@ export function ReviewSurface({
     };
   }, [walkthroughRequestId, walkthroughRequestPending]);
 
-  const startWalkthroughGeneration = useCallback(() => {
-    if (
-      !walkthrough?.onGenerate ||
-      walkthrough.status === 'generating' ||
-      walkthroughRequestPendingRef.current
-    ) {
-      return;
-    }
+  const startWalkthroughGeneration = useCallback(
+    (options?: { force?: boolean; reviewStructure?: TargetComparisonReviewStructure }) => {
+      if (
+        !walkthrough?.onGenerate ||
+        walkthrough.status === 'generating' ||
+        walkthroughRequestPendingRef.current
+      ) {
+        return;
+      }
 
-    walkthroughRequestPendingRef.current = true;
-    setWalkthroughRequestPending(true);
-    setWalkthroughRequestId((current) => current + 1);
-  }, [walkthrough]);
+      walkthroughGenerationOptionsRef.current = options ?? null;
+      walkthroughRequestPendingRef.current = true;
+      setWalkthroughRequestPending(true);
+      setWalkthroughRequestId((current) => current + 1);
+    },
+    [walkthrough],
+  );
   useEffect(() => {
     if (sidebarMode === 'walkthrough' && walkthrough?.status === 'idle') {
       startWalkthroughGeneration();
@@ -1768,6 +1879,45 @@ export function ReviewSurface({
       ? (externalUrl ?? snapshot.repository.source.url)
       : null;
   const repositoryLinkUrl = repositoryUrl ?? sourceExternalUrl;
+  const targetComparisonRange = snapshot.files
+    .flatMap((file) => file.sections)
+    .find((section) => section.range)?.range;
+  const targetBaseSha =
+    targetComparisonRange && 'sha' in targetComparisonRange.base
+      ? targetComparisonRange.base.sha
+      : null;
+  const targetHeadSha =
+    targetComparisonRange && 'sha' in targetComparisonRange.head
+      ? targetComparisonRange.head.sha
+      : snapshot.repository.source.type === 'pull-request' && snapshot.repository.source.headSha
+        ? (snapshot.repository.source.headSha as GitSha)
+        : null;
+  const targetBranch =
+    snapshot.repository.source.type === 'pull-request'
+      ? (snapshot.repository.source.targetBranch ?? 'target')
+      : 'target';
+  const targetBaseCommitSummary = targetBaseSha
+    ? targetBaseCommit?.sha === targetBaseSha
+      ? targetBaseCommit
+      : {
+          authoredAt: '',
+          authorName: '',
+          parentShas: [],
+          sha: targetBaseSha,
+          shortSha: targetBaseSha.slice(0, 8),
+          subject: `${targetBranch} base`,
+        }
+    : null;
+  const targetHeadCommitSummary = targetHeadSha
+    ? (commits.find((commit) => commit.sha === targetHeadSha) ?? {
+        authoredAt: '',
+        authorName: '',
+        parentShas: [],
+        sha: targetHeadSha,
+        shortSha: targetHeadSha.slice(0, 8),
+        subject: 'Head',
+      })
+    : null;
   const walkthroughStatus =
     walkthroughRequestPending && walkthrough?.status !== 'ready'
       ? 'generating'
@@ -1804,9 +1954,19 @@ export function ReviewSurface({
     : (walkthroughGenerationProgress?.summary ?? null);
   const shellTheme =
     snapshot.preferences.theme === 'system' ? undefined : snapshot.preferences.theme;
-  const requestWalkthrough = () => {
-    startWalkthroughGeneration();
+  const requestWalkthrough = (options?: {
+    force?: boolean;
+    reviewStructure?: TargetComparisonReviewStructure;
+  }) => {
+    startWalkthroughGeneration(options);
   };
+  const walkthroughReviewStructure: TargetComparisonReviewStructure =
+    sharedWalkthrough.structure === 'commit-by-commit' ||
+    sharedWalkthrough.structure === 'net-change'
+      ? sharedWalkthrough.structure
+      : (snapshot.reviewScope?.structure ?? 'net-change');
+  const alternateReviewStructure: TargetComparisonReviewStructure =
+    walkthroughReviewStructure === 'commit-by-commit' ? 'net-change' : 'commit-by-commit';
   const reviewModes = [
     {
       icon: <Path aria-hidden size={14} weight="bold" />,
@@ -1996,6 +2156,52 @@ export function ReviewSurface({
               pullRequestSource={history.pullRequestSource ?? null}
               searchQuery={historySearchQuery}
             />
+          ) : sidebarMode === 'tree' &&
+            snapshot.repository.source.type === 'pull-request' &&
+            commits.length > 0 ? (
+            <>
+              <section className="target-comparison-scope">
+                <div className="target-comparison-header">
+                  <strong>
+                    Compare to <code>{targetBranch}</code>
+                  </strong>
+                  <div className="comparison-endpoint-row">
+                    <span className="version-comparison-endpoint">
+                      <span>From · {targetBranch}</span>
+                      {targetBaseCommitSummary ? (
+                        <ReviewCommitRef commit={targetBaseCommitSummary} linkTrigger={false} />
+                      ) : null}
+                    </span>
+                    {' → '}
+                    <span className="version-comparison-endpoint">
+                      <span>To · Head</span>
+                      {targetHeadCommitSummary ? (
+                        <ReviewCommitRef commit={targetHeadCommitSummary} linkTrigger={false} />
+                      ) : null}
+                    </span>
+                  </div>
+                </div>
+                <CommitScopePanel
+                  commits={commits}
+                  onClear={clearTreeCommitRange}
+                  onSelectCommitRange={(range) => {
+                    setSelectedTreeCommitRange(range);
+                    setTreeCommitFiles(null);
+                    setTreeCommitDiffError(null);
+                  }}
+                  selectedCommitRange={selectedTreeCommitRange}
+                />
+              </section>
+              <ReviewFileTree
+                files={visibleFiles}
+                onActivatePath={activateTreePath}
+                reloadDeltaPaths={desktop?.reloadDeltaPaths}
+                scrollSelectedPathIntoView={content?.initialScrollTarget != null}
+                selectedPath={visibleSelectedPath}
+                showWhitespace={snapshot.preferences.showWhitespace}
+                viewed={viewed}
+              />
+            </>
           ) : sidebarMode === 'tree' ? (
             <ReviewFileTree
               files={visibleFiles}
@@ -2032,14 +2238,39 @@ export function ReviewSurface({
               </SidebarCommentSection>
             </>
           ) : walkthroughReady ? (
-            <NarrativeSidebar
-              allowCommit={walkthrough?.commit != null}
-              files={visibleFiles}
-              navigation={navigation}
-              onShareWalkthrough={walkthrough?.onShare}
-              showWhitespace={snapshot.preferences.showWhitespace}
-              walkthrough={sharedWalkthrough}
-            />
+            <>
+              {walkthrough?.onGenerate ? (
+                <div className="history-section walkthrough-structure-controls">
+                  <span>
+                    {walkthroughReviewStructure === 'commit-by-commit'
+                      ? 'Structured by commits'
+                      : 'Net-change walkthrough'}
+                  </span>
+                  <button
+                    disabled={walkthroughStatus === 'generating' || walkthroughRequestPending}
+                    onClick={() =>
+                      requestWalkthrough({
+                        force: true,
+                        reviewStructure: alternateReviewStructure,
+                      })
+                    }
+                    type="button"
+                  >
+                    {alternateReviewStructure === 'commit-by-commit'
+                      ? 'Use commit-by-commit'
+                      : 'Use net change'}
+                  </button>
+                </div>
+              ) : null}
+              <NarrativeSidebar
+                allowCommit={walkthrough?.commit != null}
+                files={visibleFiles}
+                navigation={navigation}
+                onShareWalkthrough={walkthrough?.onShare}
+                showWhitespace={snapshot.preferences.showWhitespace}
+                walkthrough={sharedWalkthrough}
+              />
+            </>
           ) : (
             <div className="sidebar-walkthrough-status-shell">
               <div
@@ -2128,7 +2359,16 @@ export function ReviewSurface({
               threads={generalCommentThreads}
             />
           ) : sidebarMode === 'tree' || sidebarMode === 'history' ? (
-            snapshot.files.length === 0 ? (
+            treeCommitDiffLoading && selectedTreeCommitRange != null ? (
+              <div className="loading codex italic">Loading selected commit changes…</div>
+            ) : treeCommitDiffError ? (
+              <div className="empty-state">
+                <div className="empty-panel squircle">
+                  <strong>Unable to load selected commit changes</strong>
+                  <p>{treeCommitDiffError}</p>
+                </div>
+              </div>
+            ) : snapshot.files.length === 0 && selectedTreeCommitRange == null ? (
               <div className="empty-state">
                 <div className="empty-panel squircle">
                   <strong>{getEmptySourceTitle(source)}</strong>
@@ -2162,6 +2402,11 @@ export function ReviewSurface({
                 allowViewedToggle
                 files={visibleFiles}
                 forceExpandedPaths={forceExpandedPaths}
+                key={
+                  selectedTreeCommitRange
+                    ? `commits:${selectedTreeCommitRange.fromSha}:${selectedTreeCommitRange.toSha}`
+                    : 'commits:all'
+                }
                 onSelectPathFromScroll={updateSelectedPathFromScroll}
                 scrollTarget={treeScrollTarget}
                 selectedPath={visibleSelectedPath}
@@ -2208,7 +2453,7 @@ export function ReviewSurface({
                       />
                     ) : null}
                     <div className="empty-panel-actions">
-                      <button onClick={requestWalkthrough} type="button">
+                      <button onClick={() => requestWalkthrough()} type="button">
                         {failedGenerationUnits.length > 0 ? 'Retry failed tasks' : 'Try again'}
                       </button>
                     </div>

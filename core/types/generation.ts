@@ -1,4 +1,11 @@
-import type { GitSha, ResolvedReviewSource } from './review-identity.ts';
+import type {
+  RepositoryState,
+  ReviewCommitSummary,
+  ReviewUnit,
+  TargetComparisonReviewPlan,
+  TargetComparisonReviewStructure,
+} from './review-history.ts';
+import type { DiffRange, GitSha, ResolvedReviewSource, ReviewSource } from './review-identity.ts';
 import type { NarrativeWalkthrough, PersistedWalkthrough } from './walkthrough.ts';
 
 export type GenerationSettings = Readonly<Record<string, boolean | number | string>>;
@@ -17,6 +24,19 @@ export type GenerationMetadata = {
   generatedAt: string;
   model: string;
   profile: GenerationProfile;
+};
+
+/** Top-level walkthrough authoring context for one Target Comparison. */
+export type WalkthroughGenerationInput = {
+  kind: 'range';
+  plan: TargetComparisonReviewPlan;
+  range: DiffRange;
+  /** Aggregate state for net-change review or later composition. */
+  state: RepositoryState;
+  unitStates?: ReadonlyArray<{
+    state: RepositoryState;
+    unit: ReviewUnit;
+  }>;
 };
 
 export type WalkthroughGenerationUnitProgress = {
@@ -57,6 +77,35 @@ export type NarrativeWalkthroughRequestOptions = {
   force?: boolean;
   previousWalkthrough?: PersistedWalkthrough;
 };
+
+export type GenerateLocalReviewWalkthroughRequest = {
+  commits: ReadonlyArray<ReviewCommitSummary>;
+  force?: boolean;
+  selection: {
+    range: DiffRange;
+    relation: 'target-comparison';
+    structure: TargetComparisonReviewStructure;
+  };
+  source: Extract<ReviewSource, { type: 'pull-request' }>;
+};
+
+export type GenerateLocalReviewWalkthroughResult =
+  | {
+      cacheKey: string;
+      pendingAssessmentThreadIds: ReadonlyArray<string>;
+      status: 'ready';
+      walkthrough: import('./walkthrough.ts').WalkthroughArtifactV5;
+    }
+  | {
+      code?: 'CODEX_NOT_FOUND' | 'CLAUDE_NOT_FOUND' | 'OPENCODE_NOT_FOUND' | 'PI_NOT_FOUND';
+      failures?: ReadonlyArray<{
+        error: string;
+        identity: 'single' | { kind: 'commit'; sha: GitSha };
+        label: string;
+      }>;
+      reason: string;
+      status: 'failed' | 'unavailable';
+    };
 
 export type WalkthroughCommitRequest = {
   body: string;
