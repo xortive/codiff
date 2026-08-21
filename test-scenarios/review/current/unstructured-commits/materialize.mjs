@@ -1,11 +1,10 @@
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import {
   initializeNotificationPreferencesRepository,
   resolveSharedPatch,
 } from '../../../shared/materialize.mjs';
 
-const scenarioDirectory = dirname(fileURLToPath(import.meta.url));
+const scenarioDirectory = import.meta.dirname;
 const updatedScenarioDirectory = join(scenarioDirectory, '..', 'current-commit-stack');
 
 export const unstructuredCommitPatches = [

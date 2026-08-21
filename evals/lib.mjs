@@ -90,6 +90,7 @@ export const initializeEvalRun = async ({ label, metadata, runDir }) => {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST') {
       throw new Error(
         `Eval run label ${JSON.stringify(label)} already exists. Choose a new label to keep suites and attempts isolated.`,
+        { cause: error },
       );
     }
     throw error;

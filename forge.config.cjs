@@ -39,7 +39,9 @@ const copyRequiredRuntime = async (source, destination) => {
     await stat(source);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(`Required packaged runtime is missing at ${source}: ${detail}`);
+    throw new Error(`Required packaged runtime is missing at ${source}: ${detail}`, {
+      cause: error,
+    });
   }
   await mkdir(dirname(destination), { recursive: true });
   await cp(source, destination, { force: true, recursive: true });

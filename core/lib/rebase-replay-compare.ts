@@ -231,8 +231,7 @@ const formatUnifiedHunks = (
       }
     }
 
-    output.push(`@@ -${oldStart},${oldCount} +${newStart},${newCount} @@`);
-    output.push(...body);
+    output.push(`@@ -${oldStart},${oldCount} +${newStart},${newCount} @@`, ...body);
   }
 
   return output.join('\n') + '\n';
@@ -714,14 +713,12 @@ const selectReplayPathPairs = ({
     const selectedAliases = new Set(selectedPairs.flatMap((pair) => pair.aliases));
     const explicitOnlyPairs = [...requestedPaths]
       .filter((path) => !selectedAliases.has(path))
-      .map(
-        (path): ReplayPathPair => ({
-          aliases: [path],
-          from: null,
-          path,
-          to: null,
-        }),
-      );
+      .map((path): ReplayPathPair => ({
+        aliases: [path],
+        from: null,
+        path,
+        to: null,
+      }));
     return [...selectedPairs, ...explicitOnlyPairs].toSorted((first, second) =>
       first.path.localeCompare(second.path),
     );
@@ -729,14 +726,12 @@ const selectReplayPathPairs = ({
   const knownPaths = new Set(pairs.flatMap((pair) => pair.aliases));
   const commentOnlyPairs = [...new Set(comments.map((comment) => comment.filePath))]
     .filter((path) => !knownPaths.has(path))
-    .map(
-      (path): ReplayPathPair => ({
-        aliases: [path],
-        from: null,
-        path,
-        to: null,
-      }),
-    );
+    .map((path): ReplayPathPair => ({
+      aliases: [path],
+      from: null,
+      path,
+      to: null,
+    }));
   return [...pairs, ...commentOnlyPairs].toSorted((first, second) =>
     first.path.localeCompare(second.path),
   );

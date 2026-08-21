@@ -794,6 +794,7 @@ const runGitHubSubmissionTests = async (review) => {
         `GitHub review submission ${review.scenario}/${action.id} failed: ${
           error instanceof Error ? error.message : String(error)
         }`,
+        { cause: error },
       );
     }
   }
@@ -862,6 +863,7 @@ const runGitLabSubmissionTests = async (review) => {
         `GitLab review submission ${review.scenario}/${action.id} failed: ${
           error instanceof Error ? error.message : String(error)
         }`,
+        { cause: error },
       );
     }
   }

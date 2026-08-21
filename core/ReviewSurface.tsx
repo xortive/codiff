@@ -200,6 +200,12 @@ const emptyPaths = new Set<string>();
 const emptyWalkthroughNotes = new Map();
 const reviewSurfacePreferencesKey = 'codiff:web-review-surface-preferences:v1';
 const mobileSidebarMediaQuery = '(max-width: 720px)';
+const agentUnavailableCodes = new Set<NonNullable<WalkthroughError['code']>>([
+  'CODEX_NOT_FOUND',
+  'CLAUDE_NOT_FOUND',
+  'OPENCODE_NOT_FOUND',
+  'PI_NOT_FOUND',
+]);
 const getLocationHashTarget = () => {
   const hash = window.location.hash.slice(1);
   if (!hash) {
@@ -218,12 +224,6 @@ const commentMatchesHashTarget = (
   comment.id === target ||
   comment.threadId === target ||
   comment.url?.slice(comment.url.lastIndexOf('#') + 1) === target;
-const agentUnavailableCodes = new Set<NonNullable<WalkthroughError['code']>>([
-  'CODEX_NOT_FOUND',
-  'CLAUDE_NOT_FOUND',
-  'OPENCODE_NOT_FOUND',
-  'PI_NOT_FOUND',
-]);
 const readSharedSidebarWidth = () =>
   typeof localStorage === 'undefined' ? SIDEBAR_DEFAULT_WIDTH : readSidebarWidth();
 
@@ -451,6 +451,7 @@ export type ReviewSourceNavigation = {
 };
 
 export type ReviewWalkthroughCapabilities = {
+  autoGenerateOnOpen?: boolean;
   commit?: CommitHandler;
   commitOutput?: CommitOutputSubscriber;
   error?: Pick<WalkthroughError, 'code' | 'reason'> | null;
@@ -1111,6 +1112,9 @@ export function ReviewSurface({
     };
   }, [snapshot.reviewScope]);
   const versionWalkthrough = snapshot.reviewScope?.kind === 'version-comparison';
+  const structuredComparisonWalkthrough =
+    snapshot.reviewScope?.kind === 'merge-request' ||
+    snapshot.reviewScope?.kind === 'version-comparison';
   const walkthroughReviewStructure: WalkthroughReviewStructure = versionWalkthrough
     ? selectedVersionWalkthroughStructure
     : selectedTargetWalkthroughStructure;
@@ -1536,7 +1540,6 @@ export function ReviewSurface({
   const [pullRequestReadySubmitting, setPullRequestReadySubmitting] = useState(false);
   const [pullRequestMergeSubmitting, setPullRequestMergeSubmitting] = useState(false);
   const [walkthroughRequestPending, setWalkthroughRequestPending] = useState(false);
-  const walkthroughRequestPendingRef = useRef(false);
   const walkthroughGenerationOptionsRef = useRef<{
     force?: boolean;
     regenerateUnitId?: EvolutionUnitId;
@@ -1602,7 +1605,7 @@ export function ReviewSurface({
       reviewFiles === snapshot.files && content?.totalLineCount
         ? content.totalLineCount
         : getUnfilteredTotalDiffLineCount(reviewFiles),
-    [content?.totalLineCount, reviewFiles, snapshot.files],
+    [content, reviewFiles, snapshot.files],
   );
   const showTotalLineCount =
     sidebarMode !== 'comments' && sidebarMode !== 'history' && totalLineCount.countable;
@@ -2094,7 +2097,6 @@ export function ReviewSurface({
         if (cancelled) {
           return;
         }
-        walkthroughRequestPendingRef.current = false;
         setWalkthroughRequestPending(false);
       });
     return () => {
@@ -2108,16 +2110,11 @@ export function ReviewSurface({
       regenerateUnitId?: EvolutionUnitId;
       reviewStructure?: WalkthroughReviewStructure;
     }) => {
-      if (
-        !walkthrough?.onGenerate ||
-        walkthrough.status === 'generating' ||
-        walkthroughRequestPendingRef.current
-      ) {
+      if (!walkthrough?.onGenerate) {
         return;
       }
 
       walkthroughGenerationOptionsRef.current = options ?? null;
-      walkthroughRequestPendingRef.current = true;
       setWalkthroughRequestPending(true);
       setWalkthroughRequestId((current) => current + 1);
     },
@@ -2127,13 +2124,22 @@ export function ReviewSurface({
     if (
       sidebarMode === 'walkthrough' &&
       walkthrough?.status === 'idle' &&
-      walkthrough.generationReady !== false
+      !walkthroughRequestPending &&
+      walkthrough.generationReady !== false &&
+      (!structuredComparisonWalkthrough || walkthrough.autoGenerateOnOpen === true)
     ) {
-      startWalkthroughGeneration({ reviewStructure: walkthroughReviewStructure });
+      const timeout = window.setTimeout(
+        () => startWalkthroughGeneration({ reviewStructure: walkthroughReviewStructure }),
+        0,
+      );
+      return () => window.clearTimeout(timeout);
     }
   }, [
     sidebarMode,
     startWalkthroughGeneration,
+    structuredComparisonWalkthrough,
+    walkthroughRequestPending,
+    walkthrough?.autoGenerateOnOpen,
     walkthrough?.generationReady,
     walkthrough?.status,
     walkthroughReviewStructure,
@@ -2894,7 +2900,7 @@ export function ReviewSurface({
     <>
       {renderTargetComparisonEndpoints()}
       <span className="comparison-range-pill">
-        {selectedTreeCommitRange
+        {sidebarMode === 'tree' && selectedTreeCommitRange
           ? `${selectedTreeCommitRange.fromSha.slice(0, 7)} → ${selectedTreeCommitRange.toSha.slice(0, 7)}`
           : 'All commit changes'}
       </span>
@@ -2925,6 +2931,8 @@ export function ReviewSurface({
   }, [walkthroughStatus]);
   const walkthroughReady = !walkthrough || walkthroughStatus === 'ready';
   const walkthroughFailed = walkthroughStatus === 'failed';
+  const walkthroughAwaitingStructure =
+    structuredComparisonWalkthrough && walkthroughStatus === 'idle';
   const walkthroughGenerationProgress = walkthrough?.generationProgress ?? null;
   const failedGenerationUnits =
     walkthroughGenerationProgress?.units?.filter((unit) => unit.status === 'failed') ?? [];
@@ -2934,14 +2942,18 @@ export function ReviewSurface({
     agentUnavailableCodes.has(walkthrough.error.code);
   const walkthroughStatusTitle = walkthroughFailed
     ? 'Walkthrough unavailable'
-    : 'Generating walkthrough…';
+    : walkthroughAwaitingStructure
+      ? 'Choose a walkthrough type'
+      : 'Generating walkthrough…';
   const walkthroughStatusDescription = walkthroughFailed
     ? agentUnavailable
       ? (walkthrough?.error?.reason ?? 'Install the configured agent and try again.')
       : (walkthroughGenerationProgress?.summary ??
         walkthrough?.error?.reason ??
         'Fix the generation issue, then try again.')
-    : (walkthroughGenerationProgress?.summary ?? null);
+    : walkthroughAwaitingStructure
+      ? 'Select a walkthrough type. Codiff loads its cache when available and generates it otherwise.'
+      : (walkthroughGenerationProgress?.summary ?? null);
   const shellTheme =
     snapshot.preferences.theme === 'system' ? undefined : snapshot.preferences.theme;
   const requestWalkthrough = (options?: {
@@ -2951,58 +2963,70 @@ export function ReviewSurface({
   }) => {
     startWalkthroughGeneration(options);
   };
-  const alternateReviewStructure: WalkthroughReviewStructure = versionWalkthrough
-    ? walkthroughReviewStructure === 'commit-evolution'
-      ? 'complete-comparison'
-      : 'commit-evolution'
-    : walkthroughReviewStructure === 'commit-by-commit'
-      ? 'net-change'
-      : 'commit-by-commit';
   const walkthroughGenerationReady = walkthrough?.generationReady !== false;
-  const walkthroughStructureControls = walkthrough?.onGenerate ? (
-    <div className="history-section walkthrough-structure-controls">
-      <span>
-        {walkthroughReviewStructure === 'commit-by-commit'
-          ? 'Structured by commits'
-          : walkthroughReviewStructure === 'net-change'
-            ? 'Net-change walkthrough'
-            : walkthroughReviewStructure === 'commit-evolution'
-              ? 'Commit Evolution'
-              : 'Complete Comparison'}
-      </span>
-      <button
-        disabled={
-          !walkthroughGenerationReady ||
-          walkthroughStatus === 'generating' ||
-          walkthroughRequestPending
-        }
-        onClick={() => {
-          if (
-            alternateReviewStructure === 'commit-evolution' ||
-            alternateReviewStructure === 'complete-comparison'
-          ) {
-            setSelectedVersionWalkthroughStructure(alternateReviewStructure);
-          } else {
-            setSelectedTargetWalkthroughStructure(alternateReviewStructure);
-          }
-          requestWalkthrough({
-            force: true,
-            reviewStructure: alternateReviewStructure,
-          });
-        }}
-        type="button"
-      >
-        {alternateReviewStructure === 'commit-by-commit'
-          ? 'Use commit-by-commit'
-          : alternateReviewStructure === 'net-change'
-            ? 'Use net change'
-            : alternateReviewStructure === 'commit-evolution'
-              ? 'Use Commit Evolution'
-              : 'Use Complete Comparison'}
-      </button>
-      {!walkthroughGenerationReady ? <small>Loading commit structure…</small> : null}
-    </div>
-  ) : null;
+  const loadedWalkthroughStructure: WalkthroughReviewStructure | null =
+    walkthroughStatus === 'ready' &&
+    (sharedWalkthrough.structure === 'commit-by-commit' ||
+      sharedWalkthrough.structure === 'net-change' ||
+      sharedWalkthrough.structure === 'commit-evolution' ||
+      sharedWalkthrough.structure === 'complete-comparison')
+      ? sharedWalkthrough.structure
+      : null;
+  const selectedWalkthroughLoaded = loadedWalkthroughStructure === walkthroughReviewStructure;
+  const requestWalkthroughStructure = (reviewStructure: WalkthroughReviewStructure) =>
+    requestWalkthrough({
+      ...(loadedWalkthroughStructure === reviewStructure ? { force: true } : {}),
+      reviewStructure,
+    });
+  const walkthroughStructureControls =
+    walkthrough?.onGenerate && structuredComparisonWalkthrough ? (
+      <div className="history-section walkthrough-structure-controls">
+        <select
+          aria-label="Walkthrough type"
+          onChange={(event) => {
+            const structure = event.currentTarget.value as WalkthroughReviewStructure;
+            if (structure === 'commit-evolution' || structure === 'complete-comparison') {
+              setSelectedVersionWalkthroughStructure(structure);
+            } else {
+              setSelectedTargetWalkthroughStructure(structure);
+            }
+          }}
+          value={walkthroughReviewStructure}
+        >
+          {versionWalkthrough ? (
+            <>
+              <option value="commit-evolution">Commit Evolution</option>
+              <option value="complete-comparison">Complete Comparison</option>
+            </>
+          ) : (
+            <>
+              <option value="commit-by-commit">Commit by commit</option>
+              <option value="net-change">Net change</option>
+            </>
+          )}
+        </select>
+        <div className="walkthrough-structure-actions">
+          <button
+            disabled={!walkthroughGenerationReady}
+            onClick={() => requestWalkthroughStructure(walkthroughReviewStructure)}
+            title={
+              selectedWalkthroughLoaded
+                ? 'Ignore the cache and regenerate the selected walkthrough'
+                : 'Load the selected walkthrough from cache, or generate it if no cache exists'
+            }
+            type="button"
+          >
+            {selectedWalkthroughLoaded ? 'Regenerate' : 'Load walkthrough'}
+          </button>
+        </div>
+        {!walkthroughGenerationReady ? <small>Loading commit structure…</small> : null}
+        {walkthrough.error ? (
+          <small className="walkthrough-structure-error" role="alert">
+            The requested walkthrough could not be loaded: {walkthrough.error.reason}
+          </small>
+        ) : null}
+      </div>
+    ) : null;
   const reviewModes = [
     {
       icon: <Path aria-hidden size={14} weight="bold" />,
@@ -3199,8 +3223,8 @@ export function ReviewSurface({
               pullRequestSource={history.pullRequestSource ?? null}
             />
           ) : null}
-          {sidebarMode === 'tree' &&
-          (versionComparison || commitScope) &&
+          {((sidebarMode === 'tree' && (versionComparison || commitScope)) ||
+            (sidebarMode === 'walkthrough' && versionComparison)) &&
           snapshot.repository.source.type === 'pull-request' ? (
             <section
               className={`history-section version-comparison-section${
@@ -3250,7 +3274,7 @@ export function ReviewSurface({
               {versionSectionExpanded && !versionCompareActive ? (
                 <div className="version-comparison-body" id="version-comparison-body">
                   <div className="comparison-endpoint-row">{renderTargetComparisonEndpoints()}</div>
-                  {commits.length > 0 ? (
+                  {sidebarMode === 'tree' && commits.length > 0 ? (
                     <CommitScopePanel
                       commits={commits}
                       onClear={clearTreeCommitRange}
@@ -3528,18 +3552,16 @@ export function ReviewSurface({
                           'Complete Comparison is available while commit evolution loads.'}
                       </small>
                       <button
-                        aria-label={`Generate ${selectedVersionWalkthroughStructure} walkthrough`}
-                        disabled={walkthroughStatus === 'generating' || walkthroughRequestPending}
+                        aria-label={`${selectedWalkthroughLoaded ? 'Regenerate' : 'Load'} ${selectedVersionWalkthroughStructure} walkthrough`}
+                        disabled={!walkthroughGenerationReady}
                         onClick={() => {
-                          requestWalkthrough({
-                            reviewStructure: selectedVersionWalkthroughStructure,
-                          });
+                          requestWalkthroughStructure(selectedVersionWalkthroughStructure);
                           setVersionSectionExpanded(false);
                           changeSidebarMode('walkthrough');
                         }}
                         type="button"
                       >
-                        Generate{' '}
+                        {selectedWalkthroughLoaded ? 'Regenerate' : 'Load'}{' '}
                         {selectedVersionWalkthroughStructure === 'commit-evolution'
                           ? 'Commit Evolution'
                           : 'Complete Comparison'}
@@ -3625,7 +3647,9 @@ export function ReviewSurface({
                     className={`sidebar-walkthrough-status${walkthroughFailed ? '' : ' codex'}`}
                     title={walkthroughStatusDescription ?? undefined}
                   >
-                    {walkthroughFailed && failedGenerationUnits.length === 0 ? (
+                    {walkthroughAwaitingStructure ? (
+                      <strong>{walkthroughStatusTitle}</strong>
+                    ) : walkthroughFailed && failedGenerationUnits.length === 0 ? (
                       <strong>{walkthroughStatusTitle}</strong>
                     ) : !walkthroughFailed && walkthrough?.progress ? (
                       walkthrough.progress
@@ -3785,6 +3809,13 @@ export function ReviewSurface({
                 walkthroughNotes={emptyWalkthroughNotes}
               />
             )
+          ) : walkthroughAwaitingStructure ? (
+            <div className="empty-state">
+              <div className="empty-panel squircle">
+                <strong>{walkthroughStatusTitle}</strong>
+                <p>{walkthroughStatusDescription}</p>
+              </div>
+            </div>
           ) : walkthroughReady ? (
             <NarrativeWalkthroughView
               allowCommit={walkthrough?.commit != null}

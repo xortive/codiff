@@ -424,7 +424,7 @@ test('standalone commit preparation remains available without a ready walkthroug
   }
 });
 
-test('requests commit-by-commit generation with canonical commits and the immutable range', async () => {
+test('requests commit-by-commit generation after an explicit cache load', async () => {
   const baseSha = '0'.repeat(40) as GitSha;
   const firstSha = 'a'.repeat(40) as GitSha;
   const secondSha = 'b'.repeat(40) as GitSha;
@@ -520,6 +520,17 @@ test('requests commit-by-commit generation with canonical commits and the immuta
     />,
   );
   try {
+    await waitFor(() => {
+      const button = [...view.container.querySelectorAll<HTMLButtonElement>('button')].find(
+        ({ textContent }) => textContent === 'Load walkthrough',
+      );
+      expect(button?.disabled).toBe(false);
+    });
+    expect(getNarrativeWalkthrough).not.toHaveBeenCalled();
+    const loadWalkthroughButton = [
+      ...view.container.querySelectorAll<HTMLButtonElement>('button'),
+    ].find(({ textContent }) => textContent === 'Load walkthrough');
+    await act(async () => loadWalkthroughButton?.click());
     await waitFor(() => expect(getNarrativeWalkthrough).toHaveBeenCalledOnce());
     expect(getNarrativeWalkthrough).toHaveBeenCalledWith({
       commits: [

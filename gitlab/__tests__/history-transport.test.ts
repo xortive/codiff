@@ -145,13 +145,10 @@ test('one GitLab Artifact Source populates stack, range, commit, and blob caches
   );
 
   const firstRange = await run.readStackAndRange(
-    { headSha: headSha, requestedBaseSha: baseSha },
+    { headSha, requestedBaseSha: baseSha },
     run.signal,
   );
-  const warmRange = await run.readStackAndRange(
-    { headSha: headSha, requestedBaseSha: baseSha },
-    run.signal,
-  );
+  const warmRange = await run.readStackAndRange({ headSha, requestedBaseSha: baseSha }, run.signal);
   const artifacts = await run.readCommitArtifacts(
     [{ commitSha: headSha, parentSha: baseSha }],
     run.signal,
@@ -237,7 +234,7 @@ test('keeps over-limit GitLab JSON Artifacts missing and reports range acquisiti
     artifacts.get(createCommitArtifactRequestKey({ commitSha: headSha, parentSha: baseSha })),
   ).toBeUndefined();
   await expect(
-    source.readStackAndRange({ headSha: headSha, requestedBaseSha: baseSha }, signal),
+    source.readStackAndRange({ headSha, requestedBaseSha: baseSha }, signal),
   ).rejects.toThrow('GitLab response exceeded the 8388608-byte Artifact safety limit.');
   expect(transport.calls.every((call) => call.maxBytes === 8 * 1024 * 1024)).toBe(true);
 });
