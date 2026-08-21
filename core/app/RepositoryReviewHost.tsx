@@ -2375,6 +2375,15 @@ export function RepositoryReviewHost({
         content: {
           initialScrollTarget: surfaceInitialScrollTarget,
           itemVersionByKey,
+          ...(!versionComparisonActive && state.diffStat
+            ? {
+                totalLineCount: {
+                  additions: state.diffStat.additions,
+                  countable: true,
+                  deletions: state.diffStat.deletions,
+                },
+              }
+            : {}),
           loadingSectionIds,
           onLoadCommentRegion: loadReviewCommentRegion,
           onLoadSection: loadDiffSection,

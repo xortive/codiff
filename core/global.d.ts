@@ -164,6 +164,7 @@ declare global {
       savePlanReview: (review: PlanReview) => Promise<PlanReview>;
       setDiffStyle: (value: CodiffPreferences['diffStyle']) => Promise<void>;
       setShowOutdated: (value: boolean) => Promise<void>;
+      setShowWhitespace: (value: boolean) => Promise<void>;
       setWordWrap: (value: boolean) => Promise<void>;
       sharePlan: (review: PlanReview) => Promise<SharePlanResult>;
       shareWalkthrough: (snapshot: SharedWalkthroughSnapshot) => Promise<ShareWalkthroughResult>;

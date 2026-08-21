@@ -79,6 +79,7 @@ import type { CodiffDiffStyle, CodiffKeymap } from './config/types.ts';
 import { getAgentLabel } from './lib/app-constants.ts';
 import type {
   CodeViewInstance,
+  DiffLineCount,
   LocalReviewNote,
   ProviderCommentDraft,
   RenderedSubmittedReviewComment,
@@ -90,7 +91,7 @@ import type {
   WalkthroughError,
 } from './lib/app-types.ts';
 import type { Command } from './lib/command-registry.ts';
-import { getDiffLineCount, getTotalDiffLineCount, isMarkdownFilePath } from './lib/diff.ts';
+import { getUnfilteredTotalDiffLineCount, isMarkdownFilePath } from './lib/diff.ts';
 import { abbreviateHomePath, sortFiles } from './lib/files.ts';
 import { isNativeInputTarget } from './lib/keyboard.ts';
 import { isGeneratedWalkthroughFile } from './lib/narrative-walkthrough-diff.js';
@@ -363,6 +364,7 @@ export type ReviewContentCapabilities = {
     file: ChangedFile,
     section: DiffSection,
   ) => Promise<FileDiffLoadedFiles>;
+  totalLineCount?: DiffLineCount;
 };
 
 export type ReviewDesktopCapabilities = {
@@ -1597,10 +1599,10 @@ export function ReviewSurface({
   );
   const totalLineCount = useMemo(
     () =>
-      getTotalDiffLineCount(
-        visibleFiles.map((file) => getDiffLineCount(file, snapshot.preferences.showWhitespace)),
-      ),
-    [snapshot.preferences.showWhitespace, visibleFiles],
+      reviewFiles === snapshot.files && content?.totalLineCount
+        ? content.totalLineCount
+        : getUnfilteredTotalDiffLineCount(reviewFiles),
+    [content?.totalLineCount, reviewFiles, snapshot.files],
   );
   const showTotalLineCount =
     sidebarMode !== 'comments' && sidebarMode !== 'history' && totalLineCount.countable;

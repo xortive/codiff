@@ -7,6 +7,7 @@ import {
   getMarkdownPreviewContents,
   getSectionForFileDiff,
   getTotalDiffLineCount,
+  getUnfilteredTotalDiffLineCount,
   getVisibleDiffSections,
   fileHasVisibleDiff,
   loadSectionContents,
@@ -587,6 +588,35 @@ test('total diff line counts sum countable files only', () => {
     additions: 0,
     countable: false,
     deletions: 0,
+  });
+});
+
+test('unfiltered totals include whitespace-only line changes', () => {
+  const file = {
+    fingerprint: 'whitespace-counts',
+    path: 'src/whitespace.ts',
+    sections: [
+      {
+        binary: false,
+        id: 'src/whitespace.ts:unstaged',
+        kind: 'unstaged',
+        loadState: 'ready',
+        newFile: {
+          contents: 'const value = 2;\nconst keep = true;  \n',
+          name: 'src/whitespace.ts',
+        },
+        oldFile: { contents: 'const value = 1;\nconst keep = true;\n', name: 'src/whitespace.ts' },
+        patch: '',
+      },
+    ],
+    status: 'modified',
+  } satisfies ChangedFile;
+
+  expect(getDiffLineCount(file, false)).toMatchObject({ additions: 1, deletions: 1 });
+  expect(getUnfilteredTotalDiffLineCount([file])).toEqual({
+    additions: 2,
+    countable: true,
+    deletions: 2,
   });
 });
 

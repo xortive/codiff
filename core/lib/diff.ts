@@ -223,6 +223,9 @@ export const getTotalDiffLineCount = (lineCounts: Iterable<DiffLineCount>): Diff
     : emptyDiffLineCount;
 };
 
+export const getUnfilteredTotalDiffLineCount = (files: ReadonlyArray<ChangedFile>): DiffLineCount =>
+  getTotalDiffLineCount(files.map((file) => getDiffLineCount(file, true)));
+
 export const formatLineCountNumber = (value: number) => value.toLocaleString('en-US');
 
 const formatCompactLineCountNumber = (value: number) => {

@@ -249,6 +249,8 @@ export type CodeViewItemMetadata = {
   reviewIdentity: ReviewIdentity;
   section: DiffSection;
   sectionCount: number;
+  showWhitespace: boolean;
+  usesWhitespaceOverride: boolean;
   walkthroughNote?: WalkthroughNote;
   walkthroughRegions?: ReadonlyArray<WalkthroughRegion>;
 };

@@ -46,7 +46,7 @@ const { decodeHtmlEntities } = require('../html-entities.cjs');
  * @typedef {{number: number; owner: string; repo: string; url: string}} PullRequestReference
  * @typedef {{direction: 'fetch' | 'push'; name: string; owner: string; repo: string}} GitHubRemote
  * @typedef {{filename: string; patch?: string; previous_filename?: string; status: string}} GitHubPullRequestFile
- * @typedef {{base?: {ref?: string; repo?: GitHubRepositoryMetadata | null; sha?: string}; body?: string | null; head?: {ref?: string; repo?: GitHubRepositoryMetadata | null; sha?: string}; title?: string; user?: {avatar_url?: string; html_url?: string; login?: string}}} GitHubPullRequestMetadata
+ * @typedef {{additions?: number; base?: {ref?: string; repo?: GitHubRepositoryMetadata | null; sha?: string}; body?: string | null; changed_files?: number; deletions?: number; head?: {ref?: string; repo?: GitHubRepositoryMetadata | null; sha?: string}; title?: string; user?: {avatar_url?: string; html_url?: string; login?: string}}} GitHubPullRequestMetadata
  * @typedef {{[key: string]: any}} GitHubReviewComment
  * @typedef {{comments?: {nodes?: ReadonlyArray<{databaseId?: number | null}>} | null; isResolved?: boolean}} GitHubReviewThread
  */
@@ -997,6 +997,16 @@ const readPullRequestState = async (launchPath, source) => {
   const reviewSource = createPullRequestSource(pullRequest, metadata);
   return {
     files,
+    ...(typeof metadata.additions === 'number' && typeof metadata.deletions === 'number'
+      ? {
+          diffStat: {
+            additions: metadata.additions,
+            deletions: metadata.deletions,
+            filesChanged:
+              typeof metadata.changed_files === 'number' ? metadata.changed_files : files.length,
+          },
+        }
+      : {}),
     generatedAt: Date.now(),
     launchPath,
     reviewCommentsLoadState: 'not-loaded',

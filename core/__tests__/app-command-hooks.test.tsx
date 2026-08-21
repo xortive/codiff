@@ -65,6 +65,11 @@ test('app commands register the complete command set and delegate dynamic action
   const onToggleViewed = vi.fn();
   const onToggleWordWrap = vi.fn();
   const writeText = vi.fn(async () => {});
+  const setShowWhitespace = vi.fn(async () => {});
+  Object.defineProperty(window, 'codiff', {
+    configurable: true,
+    value: { ...window.codiff, setShowWhitespace },
+  });
   Object.defineProperty(navigator, 'clipboard', {
     configurable: true,
     value: { writeText },
@@ -109,6 +114,7 @@ test('app commands register the complete command set and delegate dynamic action
     'toggle-sidebar',
     'toggle-outdated-comments',
     'toggle-diff-layout',
+    'toggle-whitespace',
     'toggle-word-wrap',
     'increase-code-font-size',
     'decrease-code-font-size',
@@ -132,6 +138,7 @@ test('app commands register the complete command set and delegate dynamic action
   command('open-file').execute();
   command('toggle-sidebar').execute();
   command('toggle-word-wrap').execute();
+  command('toggle-whitespace').execute();
   command('copy-comments').execute();
   command('reload').execute();
   command('toggle-viewed').execute();
@@ -142,16 +149,24 @@ test('app commands register the complete command set and delegate dynamic action
   expect(onOpenSelectedFile).toHaveBeenCalledOnce();
   expect(onToggleSidebar).toHaveBeenCalledOnce();
   expect(onToggleWordWrap).toHaveBeenCalledOnce();
+  expect(setShowWhitespace).toHaveBeenCalledWith(true);
   expect(onRefreshRepository).toHaveBeenCalledOnce();
   expect(onCopyPendingComments).toHaveBeenCalledOnce();
   expect(writeText).toHaveBeenCalledWith('# Address these Review Notes');
   expect(command('open-file').description?.()).toBe(file.path);
   expect(onToggleViewed).toHaveBeenCalledWith(file, true, target.reviewIdentity);
   expect(command('toggle-word-wrap').description?.()).toBe('Enable Word Wrap');
+  expect(command('toggle-whitespace').description?.()).toBe(
+    'Show whitespace-only changes globally',
+  );
   expect(command('copy-comments').title).toBe('Copy Review Notes');
   expect(command('copy-comments-and-close').title).toBe('Copy Review Notes and Close');
   preferencesRef.current.wordWrap = true;
   expect(command('toggle-word-wrap').description?.()).toBe('Disable Word Wrap');
+  preferencesRef.current.showWhitespace = true;
+  expect(command('toggle-whitespace').description?.()).toBe(
+    'Hide whitespace-only changes globally',
+  );
 });
 
 const keyboardKeymap = {

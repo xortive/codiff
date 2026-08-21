@@ -306,7 +306,10 @@ if (resource.includes('/compare/')) {
   }));
 } else {
   process.stdout.write(JSON.stringify({
+    additions: 12,
     base: { ref: 'main', sha: '${baseSha}' },
+    changed_files: 2,
+    deletions: 4,
     head: { sha: '${headSha}' },
     title: 'Review Range Artifacts',
     user: { login: 'ada' },
@@ -326,6 +329,7 @@ if (resource.includes('/compare/')) {
     const state = await readPullRequestState(directory, source);
 
     expect(state.files).toHaveLength(2);
+    expect(state.diffStat).toEqual({ additions: 12, deletions: 4, filesChanged: 2 });
     expect(state.files[0]).toMatchObject({ path: 'src/app.ts', status: 'modified' });
     expect(state.files[0]?.sections[0]).toMatchObject({
       id: 'src/app.ts:pull-request:7',

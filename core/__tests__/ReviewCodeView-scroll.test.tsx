@@ -216,6 +216,50 @@ const createLoadedMarkdownFile = (contents: string, fingerprint: string) => {
   };
 };
 
+test('a diff header can override the global whitespace setting without persisting it', async () => {
+  const base = createChangedFileWithPatch(
+    'src/whitespace.ts',
+    'diff --git a/src/whitespace.ts b/src/whitespace.ts\n@@ -1,2 +1,2 @@\n-const value = 1;\n-const keep = true;\n+const value = 2;\n+const keep = true;  \n',
+  );
+  const file = {
+    ...base,
+    sections: base.sections.map((section) => ({
+      ...section,
+      loadState: 'ready' as const,
+      newFile: {
+        contents: 'const value = 2;\nconst keep = true;  \n',
+        name: base.path,
+      },
+      oldFile: {
+        contents: 'const value = 1;\nconst keep = true;\n',
+        name: base.path,
+      },
+    })),
+  };
+  await using view = await renderReact(<ReviewCodeViewHarness files={[file]} />);
+  const whitespaceButton = () =>
+    view.container.querySelector<HTMLButtonElement>('.codiff-whitespace-button');
+
+  expect(whitespaceButton()?.textContent).toBe('Whitespace hidden');
+  expect(whitespaceButton()?.getAttribute('aria-pressed')).toBe('false');
+  expect(view.container.querySelector('.codiff-line-count')?.getAttribute('title')).toBe(
+    '1 added line, 1 removed line',
+  );
+  const initialVersion = codeViewMock.lastItems[0]?.version;
+
+  await act(async () => whitespaceButton()?.click());
+  await waitFor(() => expect(whitespaceButton()?.textContent).toBe('Whitespace shown'));
+  expect(whitespaceButton()?.getAttribute('aria-pressed')).toBe('true');
+  expect(view.container.querySelector('.codiff-line-count')?.getAttribute('title')).toBe(
+    '2 added lines, 2 removed lines',
+  );
+  expect(codeViewMock.lastItems[0]?.version).not.toBe(initialVersion);
+
+  await act(async () => whitespaceButton()?.click());
+  await waitFor(() => expect(whitespaceButton()?.textContent).toBe('Whitespace hidden'));
+  expect(whitespaceButton()?.getAttribute('aria-pressed')).toBe('false');
+});
+
 test('generated files are collapsed by default and can be explicitly expanded per review', async () => {
   const file = createChangedFile('src/__generated__/api.ts');
   const reviewKey = 'walkthrough:generated-api';

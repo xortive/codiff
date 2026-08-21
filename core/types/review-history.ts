@@ -482,6 +482,7 @@ export type RepositoryState = {
   branch: string | null;
   codeQualityFindings?: ReadonlyArray<PullRequestCodeQualityFinding>;
   commitMetadata?: CommitMetadata;
+  diffStat?: { additions: number; deletions: number; filesChanged: number };
   files: ReadonlyArray<ChangedFile>;
   generalComments?: ReadonlyArray<PullRequestGeneralCommentThread>;
   generatedAt: number;

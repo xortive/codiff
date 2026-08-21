@@ -183,6 +183,7 @@ const createCodiffMock = (overrides: Partial<Window['codiff']> = {}): Window['co
   savePlanReview: vi.fn(async (review) => review),
   setDiffStyle: vi.fn(async () => {}),
   setShowOutdated: vi.fn(async () => {}),
+  setShowWhitespace: vi.fn(async () => {}),
   setWordWrap: vi.fn(async () => {}),
   sharePlan: vi.fn(async () => ({
     status: 'uploaded' as const,

@@ -169,6 +169,7 @@ const codiff = {
   readRevisionContent: (request) => ipcRenderer.invoke('codiff:readRevisionContent', request),
   setDiffStyle: (value) => ipcRenderer.invoke('codiff:setDiffStyle', value),
   setShowOutdated: (value) => ipcRenderer.invoke('codiff:setShowOutdated', value),
+  setShowWhitespace: (value) => ipcRenderer.invoke('codiff:setShowWhitespace', value),
   setWordWrap: (value) => ipcRenderer.invoke('codiff:setWordWrap', value),
   sharePlan: (review) => ipcRenderer.invoke('codiff:sharePlan', review),
   shareWalkthrough: (snapshot) => ipcRenderer.invoke('codiff:shareWalkthrough', snapshot),

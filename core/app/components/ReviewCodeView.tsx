@@ -85,6 +85,7 @@ import {
   getMarkdownPreviewContents,
   getSectionForFileDiff,
   getVisibleDiffSections,
+  parseSectionDiffWithOptions,
   isMarkdownFilePath,
   loadSectionContents,
   shouldLoadDiffSectionContents,
@@ -251,6 +252,7 @@ function CodeViewHeader({
   onToggleCollapsed,
   onToggleMarkdownPreview,
   onToggleViewed,
+  onToggleWhitespace,
   readOnly,
 }: {
   allowViewedToggle: boolean;
@@ -263,6 +265,7 @@ function CodeViewHeader({
   onToggleCollapsed: (file: ChangedFile, isCollapsed: boolean, reviewKey: string) => void;
   onToggleMarkdownPreview: (file: ChangedFile, section: DiffSection) => void;
   onToggleViewed: (file: ChangedFile, isViewed: boolean, reviewIdentity: ReviewIdentity) => void;
+  onToggleWhitespace: (reviewKey: string, showWhitespace: boolean) => void;
   readOnly: boolean;
 }) {
   const {
@@ -276,6 +279,8 @@ function CodeViewHeader({
     reviewIdentity,
     section,
     sectionCount,
+    showWhitespace,
+    usesWhitespaceOverride,
     walkthroughNote,
   } = meta;
   const canOpenFile = file.status !== 'deleted';
@@ -344,6 +349,19 @@ function CodeViewHeader({
           Comment
         </Button>
       ) : null}
+      {section.binary ? null : (
+        <Button
+          aria-pressed={showWhitespace}
+          className={`codiff-whitespace-button${usesWhitespaceOverride ? ' active' : ''}`}
+          onClick={() => onToggleWhitespace(reviewIdentity.key, showWhitespace)}
+          title={`${showWhitespace ? 'Hide' : 'Show'} whitespace changes for this diff${
+            usesWhitespaceOverride ? ' (overrides the global setting)' : ''
+          }`}
+          type="button"
+        >
+          Whitespace {showWhitespace ? 'shown' : 'hidden'}
+        </Button>
+      )}
       {canRenderMarkdown ? (
         <Button
           aria-pressed={isMarkdownPreview}
@@ -3492,6 +3510,22 @@ export function ReviewCodeView({
     setDefinitionLookupSourceKey(sourceKey);
     setDefinitionLookup(null);
   }
+  const [showWhitespaceByReviewKey, setShowWhitespaceByReviewKey] = useState<
+    Readonly<Record<string, boolean>>
+  >({});
+  const toggleDiffWhitespace = useCallback(
+    (reviewKey: string, current: boolean) => {
+      const next = !current;
+      setShowWhitespaceByReviewKey((overrides) => {
+        if (next === showWhitespace) {
+          const { [reviewKey]: _removed, ...remaining } = overrides;
+          return remaining;
+        }
+        return { ...overrides, [reviewKey]: next };
+      });
+    },
+    [showWhitespace],
+  );
   const selectedLinesRef = useRef<CodeViewLineSelection | null>(null);
   const sourceDescriptionModel = buildSourceDescriptionModel({
     commitMetadata,
@@ -3546,9 +3580,18 @@ export function ReviewCodeView({
     reviewBlocks.find((block) => block.header && (block.headerSelected ?? block.selected) === true)
       ?.id ?? null;
   const hasRegionalReplay = reviewBlocks.some((block) => block.file?.regionalReplay != null);
+  const whitespaceOverrideKey = useMemo(
+    () =>
+      Object.entries(showWhitespaceByReviewKey)
+        .filter(([, value]) => value !== showWhitespace)
+        .toSorted(([left], [right]) => left.localeCompare(right))
+        .map(([key, value]) => `${key}:${value ? 'show' : 'hide'}`)
+        .join(','),
+    [showWhitespace, showWhitespaceByReviewKey],
+  );
   const codeProjectionKey = useMemo(
-    () => getReviewCodeProjectionKey(blocks, files, showWhitespace),
-    [blocks, files, showWhitespace],
+    () => `${getReviewCodeProjectionKey(blocks, files, showWhitespace)}:${whitespaceOverrideKey}`,
+    [blocks, files, showWhitespace, whitespaceOverrideKey],
   );
   const codeViewContainerRef = useRef<HTMLDivElement>(null);
   const appliedExpansionDigestByInstanceRef = useRef(new WeakMap<object, string>());
@@ -3671,7 +3714,19 @@ export function ReviewCodeView({
         !forceExpandedPaths.has(file.path) &&
         !expandedGenerated.has(reviewKey) &&
         (collapsed.has(reviewKey) || isGeneratedWalkthroughFile(file));
-      const visibleSections = getVisibleDiffSections(file, showWhitespace);
+      const storedWhitespaceOverride = showWhitespaceByReviewKey[reviewKey];
+      const whitespaceOverride =
+        storedWhitespaceOverride === showWhitespace ? undefined : storedWhitespaceOverride;
+      const diffShowWhitespace = whitespaceOverride ?? showWhitespace;
+      const matchingSections = getVisibleDiffSections(file, diffShowWhitespace);
+      // Keep a reversible file header when a local override hides every hunk.
+      const visibleSections =
+        matchingSections.length > 0 || whitespaceOverride == null
+          ? matchingSections
+          : file.sections.slice(0, 1).map((section) => ({
+              fileDiff: parseSectionDiffWithOptions(file, section, diffShowWhitespace),
+              section,
+            }));
       const lineCount = getDiffLineCountFromVisibleSections(visibleSections);
       const sections = isCollapsed ? visibleSections.slice(0, 1) : visibleSections;
       const walkthroughNote = getBlockWalkthroughNote(block, walkthroughNotes);
@@ -3818,6 +3873,8 @@ export function ReviewCodeView({
           reviewIdentity,
           section,
           sectionCount: file.sections.length,
+          showWhitespace: diffShowWhitespace,
+          usesWhitespaceOverride: whitespaceOverride != null,
           walkthroughNote,
           ...(visibleRegions.length > 0 ? { walkthroughRegions: visibleRegions } : {}),
         });
@@ -3904,7 +3961,7 @@ export function ReviewCodeView({
           type: 'diff',
           version: getItemVersion(
             `${reviewVersionPrefix}:${sectionStateVersionKey}:${
-              showWhitespace ? 'ws' : 'ignore-ws'
+              diffShowWhitespace ? 'ws' : 'ignore-ws'
             }:${diffStyle}:${getReviewCommentsDigest(sectionComments)}:${codeQualityAnnotations
               .map(({ metadata }) =>
                 metadata.type === 'code-quality'
@@ -3951,6 +4008,7 @@ export function ReviewCodeView({
     reviewBlocks,
     selectedPath,
     showWhitespace,
+    showWhitespaceByReviewKey,
     source.type,
     viewed,
     reviewIdentityByPath,
@@ -5415,6 +5473,7 @@ export function ReviewCodeView({
           onToggleCollapsed={onToggleCollapsed}
           onToggleMarkdownPreview={toggleMarkdownPreview}
           onToggleViewed={onToggleViewed}
+          onToggleWhitespace={toggleDiffWhitespace}
           readOnly={isReadOnly}
         />
       ) : null;
@@ -5431,6 +5490,7 @@ export function ReviewCodeView({
       onToggleCollapsed,
       onToggleViewed,
       toggleMarkdownPreview,
+      toggleDiffWhitespace,
     ],
   );
 
