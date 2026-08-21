@@ -33,10 +33,13 @@ export type WalkthroughUnitBoundary = {
   kind?: NonNullable<WalkthroughModel['units']>[number]['kind'];
 };
 
-/** A chapter with indexed stops. */
+/** A chapter with indexed stops and any support owned by its enclosing unit. */
 type WalkthroughChapterView = Omit<WalkthroughModel['chapters'][number], 'stops'> & {
   boundary?: WalkthroughUnitBoundary;
   stops: ReadonlyArray<WalkthroughStopView>;
+  supportBoundary?: WalkthroughUnitBoundary;
+  unitSupport: ReadonlyArray<WalkthroughSupportGroup>;
+  unitSupportByReason: ReadonlyArray<WalkthroughSupportReason>;
 };
 
 /** Support grouped by reason, preserving first-seen order. */
@@ -51,6 +54,8 @@ export type WalkthroughView = {
   sequence: ReadonlyArray<WalkthroughStopView>;
   support: ReadonlyArray<WalkthroughSupportGroup>;
   supportByReason: ReadonlyArray<WalkthroughSupportReason>;
+  unassignedSupport: ReadonlyArray<WalkthroughSupportGroup>;
+  unassignedSupportByReason: ReadonlyArray<WalkthroughSupportReason>;
 };
 
 export type WalkthroughFileList = {
@@ -368,14 +373,32 @@ export const buildWalkthroughView = (walkthrough: WalkthroughModel): Walkthrough
   }
 
   const boundaryByChapterId = new Map<string, WalkthroughUnitBoundary>();
+  const supportBoundaryByChapterId = new Map<string, WalkthroughUnitBoundary>();
+  const supportById = new Map(walkthrough.support.map((item) => [item.id, item]));
+  const unitSupportByChapterId = new Map<string, ReadonlyArray<WalkthroughSupportGroup>>();
+  const assignedSupportIds = new Set<string>();
   for (const unit of walkthrough.units ?? []) {
+    const boundary: WalkthroughUnitBoundary = {
+      ...(unit.commit ? { commit: unit.commit } : {}),
+      identity: unit.identity,
+      ...(unit.kind ? { kind: unit.kind } : {}),
+    };
     const firstChapterId = unit.chapterIds[0];
     if (firstChapterId) {
-      boundaryByChapterId.set(firstChapterId, {
-        ...(unit.commit ? { commit: unit.commit } : {}),
-        identity: unit.identity,
-        ...(unit.kind ? { kind: unit.kind } : {}),
-      });
+      boundaryByChapterId.set(firstChapterId, boundary);
+    }
+    const lastChapterId = unit.chapterIds.at(-1);
+    const unitSupport = unit.supportIds.flatMap((id) => {
+      const item = supportById.get(id);
+      if (item) {
+        assignedSupportIds.add(id);
+        return [item];
+      }
+      return [];
+    });
+    if (lastChapterId && unitSupport.length > 0) {
+      supportBoundaryByChapterId.set(lastChapterId, boundary);
+      unitSupportByChapterId.set(lastChapterId, unitSupport);
     }
   }
   const sequence: Array<WalkthroughStopView> = [];
@@ -386,18 +409,30 @@ export const buildWalkthroughView = (walkthrough: WalkthroughModel): Walkthrough
       return view;
     });
     const boundary = boundaryByChapterId.get(chapter.id);
-    return { ...chapter, ...(boundary ? { boundary } : {}), stops };
+    const supportBoundary = supportBoundaryByChapterId.get(chapter.id);
+    const unitSupport = unitSupportByChapterId.get(chapter.id) ?? [];
+    return {
+      ...chapter,
+      ...(boundary ? { boundary } : {}),
+      stops,
+      ...(supportBoundary ? { supportBoundary } : {}),
+      unitSupport,
+      unitSupportByReason: groupSupportByReason(unitSupport),
+    };
   });
 
   if (sequence.length === 0) {
     return null;
   }
 
+  const unassignedSupport = walkthrough.support.filter((item) => !assignedSupportIds.has(item.id));
   return {
     chapters,
     sequence,
     support: walkthrough.support,
     supportByReason: groupSupportByReason(walkthrough.support),
+    unassignedSupport,
+    unassignedSupportByReason: groupSupportByReason(unassignedSupport),
   };
 };
 

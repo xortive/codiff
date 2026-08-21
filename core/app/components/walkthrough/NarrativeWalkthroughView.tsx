@@ -321,17 +321,68 @@ function StopHeader({
     </div>
   );
 }
-function SupportHeader() {
+function SupportHeader({
+  prose = 'Supporting changes grouped outside the main sequence.',
+  title = 'Support',
+}: {
+  prose?: string;
+  title?: string;
+}) {
   return (
     <div className="wt-stop-block wt-stop-block-header">
       <div className="wt-stage-title-row">
-        <h2 className="wt-stage-title">Support</h2>
+        <h2 className="wt-stage-title">{title}</h2>
         <ImportancePill importance="normal" />
       </div>
-      <Narration prose="Supporting changes grouped outside the main sequence." />
+      <Narration prose={prose} />
     </div>
   );
 }
+
+const appendUnitSupportBlocks = ({
+  blocks,
+  chapter,
+  files,
+  selected,
+  stop,
+  stopIndexByBlockId,
+}: {
+  blocks: Array<ReviewDiffBlock>;
+  chapter: WalkthroughView['chapters'][number] | undefined;
+  files: ReadonlyArray<ChangedFile>;
+  selected: boolean;
+  stop: WalkthroughStopView;
+  stopIndexByBlockId: Map<string, number>;
+}) => {
+  if (chapter?.stops.at(-1)?.id !== stop.id || chapter.unitSupport.length === 0) {
+    return;
+  }
+  let blockCount = 0;
+  const commitOwned = chapter.supportBoundary?.identity.kind === 'commit';
+  const supportProse = commitOwned
+    ? 'Supporting changes for this commit.'
+    : 'Supporting changes for this evolution unit.';
+  const supportTitle = 'Support';
+  for (const group of chapter.unitSupportByReason) {
+    for (const item of group.files) {
+      getFocusedRunDiffs(item, files).forEach(({ file, note, reviewIdentity }, runIndex) => {
+        const blockId = `walkthrough:unit-support:${item.id}:${runIndex}`;
+        stopIndexByBlockId.set(blockId, stop.index);
+        blocks.push({
+          file,
+          header:
+            blockCount === 0 ? <SupportHeader prose={supportProse} title={supportTitle} /> : null,
+          headerSelected: selected,
+          id: blockId,
+          itemIdPrefix: blockId,
+          note: note ?? item.note ?? group.reason,
+          reviewIdentity,
+        });
+        blockCount++;
+      });
+    }
+  }
+};
 
 const createWalkthroughBlocks = (
   files: ReadonlyArray<ChangedFile>,
@@ -371,6 +422,14 @@ const createWalkthroughBlocks = (
         ),
         headerSelected: stop.index === currentIndex,
         id: blockId,
+      });
+      appendUnitSupportBlocks({
+        blocks,
+        chapter,
+        files,
+        selected: stop.index === currentIndex,
+        stop,
+        stopIndexByBlockId,
       });
       continue;
     }
@@ -423,6 +482,14 @@ const createWalkthroughBlocks = (
         reviewIdentity,
       });
     });
+    appendUnitSupportBlocks({
+      blocks,
+      chapter,
+      files,
+      selected: stop.index === currentIndex,
+      stop,
+      stopIndexByBlockId,
+    });
   }
 
   return { blocks, firstBlockIdByStop, stopIndexByBlockId };
@@ -448,14 +515,19 @@ const createSupportBlocks = (
   showWhitespace: boolean,
 ): ReadonlyArray<ReviewDiffBlock> => {
   const blocks: Array<ReviewDiffBlock> = [];
-  for (const group of walkthroughView.supportByReason) {
+  const hasUnitSupport = walkthroughView.unassignedSupport.length < walkthroughView.support.length;
+  const supportTitle = hasUnitSupport ? 'Unassigned changes' : 'Support';
+  const supportProse = hasUnitSupport
+    ? 'Changes that could not be assigned to a walkthrough commit.'
+    : 'Supporting changes grouped outside the main sequence.';
+  for (const group of walkthroughView.unassignedSupportByReason) {
     for (const item of group.files) {
       getFocusedRunDiffs(item, files).forEach(({ file, note, reviewIdentity }, runIndex) => {
         const blockId = `walkthrough:support:${item.id}:${runIndex}`;
         const isFirstBlock = blocks.length === 0;
         blocks.push({
           file,
-          header: isFirstBlock ? <SupportHeader /> : null,
+          header: isFirstBlock ? <SupportHeader prose={supportProse} title={supportTitle} /> : null,
           headerSelected: selected,
           id: blockId,
           itemIdPrefix: blockId,
@@ -472,7 +544,7 @@ const createSupportBlocks = (
     const isFirstBlock = blocks.length === 0;
     blocks.push({
       file,
-      header: isFirstBlock ? <SupportHeader /> : null,
+      header: isFirstBlock ? <SupportHeader prose={supportProse} title={supportTitle} /> : null,
       headerSelected: selected,
       id: blockId,
       itemIdPrefix: blockId,

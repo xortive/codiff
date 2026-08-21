@@ -396,6 +396,47 @@ test('buildWalkthroughView indexes stops and groups support by reason', () => {
   expect(view.supportByReason.map((support) => support.reason)).toEqual(['Lockfile', 'Mechanical']);
 });
 
+test('buildWalkthroughView keeps support with its owning commit', () => {
+  const base = walkthrough();
+  const view = buildWalkthroughView({
+    ...base,
+    chapters: [
+      ...base.chapters,
+      {
+        ...base.chapters[1]!,
+        id: 'follow-up',
+        stops: [{ ...base.chapters[1]!.stops[0]!, id: 's3' }],
+        title: 'Follow-up',
+      },
+    ],
+    structure: 'commit-by-commit',
+    units: [
+      {
+        chapterIds: ['bug', 'proof'],
+        identity: { kind: 'commit', sha: gitSha('a'.repeat(40)) },
+        supportIds: ['lock'],
+      },
+      {
+        chapterIds: ['follow-up'],
+        identity: { kind: 'commit', sha: gitSha('b'.repeat(40)) },
+        supportIds: ['mirror'],
+      },
+    ],
+  })!;
+
+  expect(view.chapters.map((chapter) => chapter.unitSupport.map((item) => item.id))).toEqual([
+    [],
+    ['lock'],
+    ['mirror'],
+  ]);
+  expect(view.chapters.map((chapter) => chapter.unitSupportByReason[0]?.reason)).toEqual([
+    undefined,
+    'Lockfile',
+    'Mechanical',
+  ]);
+  expect(view.unassignedSupport).toEqual([]);
+});
+
 test('buildWalkthroughView preserves cross-file hunk groups in one stop', () => {
   const base = walkthrough();
   const wt: WalkthroughModel = {
