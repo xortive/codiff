@@ -68,9 +68,9 @@ const parseCommitNameStatus = (raw, options = {}) => {
   return options.sort === false ? files : files.sort(fileSort);
 };
 
-/** @param {string} repoRoot @param {string} commit @returns {Promise<Array<GitSha>>} */
-const readCommitParents = async (repoRoot, commit) => {
-  const raw = (await git(repoRoot, ['rev-list', '--parents', '-n', '1', commit])).trim();
+/** @param {string} repoRoot @param {string} commit @param {{signal?: AbortSignal}} [options] @returns {Promise<Array<GitSha>>} */
+const readCommitParents = async (repoRoot, commit, options = {}) => {
+  const raw = (await git(repoRoot, ['rev-list', '--parents', '-n', '1', commit], options)).trim();
   return raw ? /** @type {Array<GitSha>} */ (raw.split(' ').slice(1)) : [];
 };
 
@@ -78,7 +78,7 @@ const readCommitParents = async (repoRoot, commit) => {
  * @param {string} repoRoot
  * @param {string} commit
  * @param {string | undefined} firstParent
- * @param {{sort?: boolean}} [options]
+ * @param {{signal?: AbortSignal, sort?: boolean}} [options]
  */
 const readCommitNameStatus = async (repoRoot, commit, firstParent, options = {}) =>
   parseCommitNameStatus(
@@ -87,6 +87,7 @@ const readCommitNameStatus = async (repoRoot, commit, firstParent, options = {})
       firstParent
         ? ['diff', '--name-status', '-r', '-z', '-M', firstParent, commit]
         : ['diff-tree', '--no-commit-id', '--name-status', '-r', '-z', '--root', '-M', commit],
+      { signal: options.signal },
     ),
     options,
   );
@@ -307,10 +308,11 @@ const readResolvedComparison = async (launchPath, source) => {
   };
 };
 
-/** @param {string} repoRoot @param {string} commit @returns {Promise<ResolvedComparison>} */
-const readResolvedCommitComparison = async (repoRoot, commit) => {
-  const [firstParent] = await readCommitParents(repoRoot, commit);
+/** @param {string} repoRoot @param {string} commit @param {{signal?: AbortSignal}} [options] @returns {Promise<ResolvedComparison>} */
+const readResolvedCommitComparison = async (repoRoot, commit, options = {}) => {
+  const [firstParent] = await readCommitParents(repoRoot, commit, options);
   const status = await readCommitNameStatus(repoRoot, commit, firstParent, {
+    signal: options.signal,
     sort: false,
   });
   return {

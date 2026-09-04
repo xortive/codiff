@@ -32,5 +32,10 @@ export const diffRangeSchema = z.object({
   head: revisionSchema.nullable(),
 });
 
-/** Durable, range-only coordinate for a shared walkthrough review comment. */
-export const reviewCommentPositionSchema = z.object({ range: diffRangeSchema }).strict();
+/** Durable coordinate for a shared walkthrough review comment. */
+export const reviewCommentPositionSchema = z
+  .object({
+    range: diffRangeSchema,
+    versionId: nonEmptyString(256).optional(),
+  })
+  .strict();

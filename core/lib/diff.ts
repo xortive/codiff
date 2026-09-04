@@ -164,6 +164,11 @@ export const getDiffLineCountFromVisibleSections = (
 
   for (const { fileDiff, section } of sections) {
     if (section.binary || (section.loadState != null && section.loadState !== 'ready')) {
+      if (!section.binary && section.lineCount) {
+        additions += section.lineCount.additions;
+        countable = true;
+        deletions += section.lineCount.deletions;
+      }
       continue;
     }
 
@@ -217,6 +222,9 @@ export const getTotalDiffLineCount = (lineCounts: Iterable<DiffLineCount>): Diff
       }
     : emptyDiffLineCount;
 };
+
+export const getUnfilteredTotalDiffLineCount = (files: ReadonlyArray<ChangedFile>): DiffLineCount =>
+  getTotalDiffLineCount(files.map((file) => getDiffLineCount(file, true)));
 
 export const formatLineCountNumber = (value: number) => value.toLocaleString('en-US');
 

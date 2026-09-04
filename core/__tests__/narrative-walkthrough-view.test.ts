@@ -290,7 +290,7 @@ test('walkthrough scroll targets track explicit navigation, not scroll-derived m
 
 test('formatWalkthroughFileLineRows gives each visible file its own count', () => {
   expect(formatWalkthroughFileLineRows([])).toEqual([
-    { added: 0, deleted: 0, label: '0 files', title: '' },
+    { added: 0, available: true, deleted: 0, label: '0 files', title: '' },
   ]);
 
   expect(
@@ -302,6 +302,7 @@ test('formatWalkthroughFileLineRows gives each visible file its own count', () =
   ).toEqual([
     {
       added: 3,
+      available: true,
       deleted: 1,
       label: 'App.tsx',
       path: 'src/App.tsx',
@@ -309,11 +310,74 @@ test('formatWalkthroughFileLineRows gives each visible file its own count', () =
     },
     {
       added: 3,
+      available: true,
       deleted: 0,
       label: 'App.test.tsx',
       path: 'tests/App.test.tsx',
       title: 'tests/App.test.tsx',
     },
+  ]);
+});
+
+test('resolves walkthrough counts from live patches, provider metadata, and unavailable evidence', () => {
+  const items = [
+    hunk({
+      added: 0,
+      deleted: 0,
+      display: 'src/live.ts:1',
+      id: 'src/live.ts:pull-request:h1',
+      kind: 'synthetic',
+      path: 'src/live.ts',
+      sectionId: 'src/live.ts:pull-request',
+      status: 'modified',
+    }),
+    hunk({
+      added: 0,
+      deleted: 0,
+      display: 'src/zero.ts:1',
+      id: 'src/zero.ts:pull-request:h1',
+      kind: 'synthetic',
+      path: 'src/zero.ts',
+      sectionId: 'src/zero.ts:pull-request',
+      status: 'modified',
+    }),
+    hunk({
+      added: 0,
+      deleted: 0,
+      display: 'src/unknown.ts:1',
+      id: 'src/unknown.ts:pull-request:h1',
+      kind: 'synthetic',
+      path: 'src/unknown.ts',
+      sectionId: 'src/unknown.ts:pull-request',
+      status: 'modified',
+    }),
+  ];
+  const files: ReadonlyArray<ChangedFile> = items.map((item, index) => ({
+    fingerprint: item.path,
+    path: item.path,
+    sections: [
+      {
+        binary: false,
+        id: item.anchor.sectionId!,
+        kind: 'pull-request',
+        ...(index === 0
+          ? { loadState: 'ready' as const, patch: '@@ -1 +1,2 @@\n-old\n+new\n+more\n' }
+          : index === 1
+            ? {
+                lineCount: { additions: 0, deletions: 0 },
+                loadState: 'deferred' as const,
+                patch: '',
+              }
+            : { loadState: 'deferred' as const, patch: '' }),
+      },
+    ],
+    status: 'modified',
+  }));
+
+  expect(resolveWalkthroughFileLineItems(items, files)).toEqual([
+    { added: 2, available: true, deleted: 1, path: 'src/live.ts' },
+    { added: 0, available: true, deleted: 0, path: 'src/zero.ts' },
+    { added: 0, available: false, deleted: 0, path: 'src/unknown.ts' },
   ]);
 });
 
@@ -330,6 +394,47 @@ test('buildWalkthroughView indexes stops and groups support by reason', () => {
     ['s2'],
   ]);
   expect(view.supportByReason.map((support) => support.reason)).toEqual(['Lockfile', 'Mechanical']);
+});
+
+test('buildWalkthroughView keeps support with its owning commit', () => {
+  const base = walkthrough();
+  const view = buildWalkthroughView({
+    ...base,
+    chapters: [
+      ...base.chapters,
+      {
+        ...base.chapters[1]!,
+        id: 'follow-up',
+        stops: [{ ...base.chapters[1]!.stops[0]!, id: 's3' }],
+        title: 'Follow-up',
+      },
+    ],
+    structure: 'commit-by-commit',
+    units: [
+      {
+        chapterIds: ['bug', 'proof'],
+        identity: { kind: 'commit', sha: gitSha('a'.repeat(40)) },
+        supportIds: ['lock'],
+      },
+      {
+        chapterIds: ['follow-up'],
+        identity: { kind: 'commit', sha: gitSha('b'.repeat(40)) },
+        supportIds: ['mirror'],
+      },
+    ],
+  })!;
+
+  expect(view.chapters.map((chapter) => chapter.unitSupport.map((item) => item.id))).toEqual([
+    [],
+    ['lock'],
+    ['mirror'],
+  ]);
+  expect(view.chapters.map((chapter) => chapter.unitSupportByReason[0]?.reason)).toEqual([
+    undefined,
+    'Lockfile',
+    'Mechanical',
+  ]);
+  expect(view.unassignedSupport).toEqual([]);
 });
 
 test('buildWalkthroughView preserves cross-file hunk groups in one stop', () => {
@@ -524,7 +629,7 @@ test('uncovered walkthrough files keep visible non-hunk sections in support fall
     'public/logo.png:staged',
   ]);
   expect(getUncoveredWalkthroughFileLineItems(files, view, false)).toEqual([
-    { added: 0, deleted: 0, diffAvailable: false, path: 'public/logo.png' },
+    { added: 0, available: false, deleted: 0, path: 'public/logo.png' },
   ]);
 });
 
@@ -610,10 +715,10 @@ test('synthetic walkthrough counts prefer exact content and preserve unknown and
       files,
     ),
   ).toEqual([
-    { added: 1, deleted: 1, path: 'src/exact.ts' },
-    { added: 0, deleted: 3767, path: 'src/provider.ts' },
-    { added: 0, deleted: 0, path: 'src/zero.ts' },
-    { added: 0, deleted: 0, diffAvailable: false, path: 'src/unknown.ts' },
+    { added: 1, available: true, deleted: 1, path: 'src/exact.ts' },
+    { added: 0, available: true, deleted: 3767, path: 'src/provider.ts' },
+    { added: 0, available: true, deleted: 0, path: 'src/zero.ts' },
+    { added: 0, available: false, deleted: 0, path: 'src/unknown.ts' },
   ]);
 });
 
@@ -952,7 +1057,7 @@ test('uncovered walkthrough files preserve uncovered hunks from partially covere
     parseSectionDiffWithOptions(uncoveredFiles[0], uncoveredFiles[0].sections[0], false).hunks,
   ).toHaveLength(2);
   expect(getUncoveredWalkthroughFileLineItems([file], view, false)).toEqual([
-    { added: 2, deleted: 2, path: file.path },
+    { added: 2, available: true, deleted: 2, path: file.path },
   ]);
 });
 

@@ -4,9 +4,14 @@ import type {
 } from './review-comments.ts';
 import type {
   ChangedFile,
+  DiffComparison,
+  DiffRange,
+  EvolutionUnitId,
   GitFileStatus,
   GitSha,
   ResolvedReviewSource,
+  ReviewSource,
+  ReviewVersionId,
 } from './review-identity.ts';
 
 export type ReviewAuthor = {
@@ -89,6 +94,56 @@ export type ReviewCommitListEntry = ReviewCommitSummary & {
   role?: string;
 };
 
+export type DiffComparisonCommentAssociation = {
+  commentId: string;
+  filePath?: string;
+  status: 'newly-anchored' | 'outdated' | 'resolved-by-change' | 'still-valid';
+};
+
+export type DiffComparisonBaseMovementCommit = {
+  authoredAt: string;
+  authorName: string;
+  sha: GitSha;
+  shortSha: string;
+  subject: string;
+  webUrl?: string;
+};
+
+export type DiffComparisonBaseMovement = {
+  changed: boolean;
+  commits?: ReadonlyArray<DiffComparisonBaseMovementCommit>;
+  commitsBetween: number | null;
+  commitTimestampDeltaMs: number | null;
+  diffStat: { additions: number; deletions: number; filesChanged: number } | null;
+  from: { committedAt: string | null; sha: GitSha; shortSha: string; webUrl?: string };
+  relationship: 'forward' | 'backward' | 'divergent' | 'unknown';
+  to: { committedAt: string | null; sha: GitSha; shortSha: string; webUrl?: string };
+  truncated: boolean;
+  warning?: string;
+};
+
+export type DiffComparisonSummary = {
+  addedLines: number;
+  baseMoved: boolean;
+  commentsAffected: number;
+  conflictFiles: number;
+  deletedLines: number;
+  empty: boolean;
+  filesChanged: number;
+  intentionalFiles: number;
+  noiseFiles: number;
+};
+
+export type ReviewRebaseOverlapCommit = {
+  authoredAt: string;
+  authorName: string;
+  overlappingPaths: ReadonlyArray<string>;
+  sha: GitSha;
+  shortSha: string;
+  subject: string;
+  webUrl?: string;
+};
+
 /** One ordinary commit in a Target Comparison review plan. */
 export type ReviewCommitUnit = {
   commit: ReviewCommitSummary;
@@ -97,13 +152,125 @@ export type ReviewCommitUnit = {
   reviewable: true;
 };
 
-/** Reviewable work units begin with ordinary commits; V01 adds Evolution Units. */
-export type ReviewUnit = ReviewCommitUnit;
+/** Version Comparison reviewable units retain their own branded identity. */
+export type ReviewEvolutionReviewableUnit =
+  | {
+      after: ReviewCommitSummary;
+      confidence: 'exact' | 'high' | 'unmatched';
+      kind: 'introduced';
+      matchReasons?: ReadonlyArray<string>;
+      matchScore?: number;
+      order: number;
+      reviewable: true;
+      unitId: EvolutionUnitId;
+    }
+  | {
+      before: ReviewCommitSummary;
+      confidence: 'exact' | 'high' | 'unmatched';
+      kind: 'removed';
+      matchReasons?: ReadonlyArray<string>;
+      matchScore?: number;
+      order: number;
+      reviewable: true;
+      unitId: EvolutionUnitId;
+    }
+  | {
+      after: ReviewCommitSummary;
+      before: ReviewCommitSummary;
+      confidence: 'exact' | 'high' | 'unmatched';
+      kind: 'revised';
+      matchReasons?: ReadonlyArray<string>;
+      matchScore?: number;
+      order: number;
+      rebaseOverlaps?: ReadonlyArray<ReviewRebaseOverlapCommit>;
+      reviewable: true;
+      unitId: EvolutionUnitId;
+    }
+  | {
+      after: ReviewCommitSummary;
+      before: ReviewCommitSummary;
+      confidence: 'exact' | 'high' | 'unmatched';
+      kind: 'ambiguous';
+      matchReasons?: ReadonlyArray<string>;
+      matchScore?: number;
+      order: number;
+      reviewable: true;
+      unitId: EvolutionUnitId;
+    };
 
-/** One Tree projection for a Target Comparison. */
-export type TreeInspectionScope = { kind: 'complete-diff' } | { kind: 'commit'; sha: GitSha };
+export type ReviewUnit = ReviewCommitUnit | ReviewEvolutionReviewableUnit;
+
+/** Non-reviewable evolution markers retained for stack display. */
+export type ReviewEvolutionMarkerUnit = {
+  after?: ReviewCommitSummary;
+  baseCommit?: ReviewCommitSummary;
+  before?: ReviewCommitSummary;
+  confidence: 'exact' | 'high' | 'unmatched';
+  kind: 'retained' | 'rewritten-same-patch' | 'absorbed-into-base' | 'ambiguous';
+  matchReasons?: ReadonlyArray<string>;
+  matchScore?: number;
+  order: number;
+  reviewable: false;
+  unitId: EvolutionUnitId;
+};
+
+/** Evolution Units are presented by their explicit numeric `order`. */
+export type ReviewEvolutionUnit = ReviewUnit | ReviewEvolutionMarkerUnit;
+
+export type VersionCommitKind = Exclude<ReviewEvolutionUnit['kind'], 'commit'>;
+
+/** One Tree projection for the active review relation. */
+export type TreeInspectionScope =
+  | { kind: 'complete-diff' }
+  | { kind: 'commit'; sha: GitSha }
+  | { kind: 'evolution-unit'; unitId: EvolutionUnitId };
 
 export type TargetComparisonReviewStructure = 'commit-by-commit' | 'net-change';
+export type VersionComparisonReviewStructure = 'commit-evolution' | 'complete-comparison';
+
+export type ReviewSelection =
+  | { kind: 'target-comparison'; versionId: ReviewVersionId }
+  | {
+      fromVersionId: ReviewVersionId;
+      kind: 'version-comparison';
+      toVersionId: ReviewVersionId;
+    };
+
+export type ReviewEvolutionSummary = {
+  absorbedIntoBase: number;
+  added: number;
+  ambiguous: number;
+  /** Every selected change can be represented by a reviewable Evolution Unit. */
+  completeCoverage: boolean;
+  pairingCoverage: number;
+  removed: number;
+  retained: number;
+  reviewable: number;
+  revised: number;
+  rewrittenSamePatch: number;
+  unreviewableAmbiguous: number;
+};
+
+export type ReviewStructureRecommendation = {
+  confidence?: number;
+  rationale: string;
+  suggestedStructure: VersionComparisonReviewStructure;
+};
+
+export type ReviewCommitEvolution = {
+  recommendation: ReviewStructureRecommendation;
+  summary: ReviewEvolutionSummary;
+  units: ReadonlyArray<ReviewEvolutionUnit>;
+  warnings?: ReadonlyArray<string>;
+};
+
+export type DiffComparisonAnalysis = {
+  baseMovement?: DiffComparisonBaseMovement;
+  commentAssociations?: ReadonlyArray<DiffComparisonCommentAssociation>;
+  commitEvolution?: ReviewCommitEvolution;
+  summary: DiffComparisonSummary;
+  warnings?: ReadonlyArray<string>;
+};
 
 /** Target Comparison generation never uses Evolution Units. */
 export type TargetComparisonReviewPlan =
@@ -117,8 +284,154 @@ export type TargetComparisonReviewPlan =
       units: ReadonlyArray<ReviewCommitUnit>;
     };
 
-/** Resolved generation plan; V01 extends this union with Version Comparison plans. */
-export type ReviewPlan = TargetComparisonReviewPlan;
+export type VersionComparisonReviewPlan =
+  | {
+      analysis?: DiffComparisonAnalysis;
+      comparison?: DiffComparison;
+      reviewRelation: 'version-comparison';
+      structure: 'complete-comparison';
+    }
+  | {
+      analysis?: DiffComparisonAnalysis;
+      comparison?: DiffComparison;
+      reviewRelation: 'version-comparison';
+      structure: 'commit-evolution';
+      units: ReadonlyArray<ReviewEvolutionReviewableUnit>;
+    };
+
+export type ReviewPlan = TargetComparisonReviewPlan | VersionComparisonReviewPlan;
+
+export type ReviewVersionActivityReason = {
+  kind: 'approval' | 'comment' | 'review';
+  occurredAt: string;
+};
+
+export type ReviewVersionActivity = {
+  latestAt: string;
+  reasons: ReadonlyArray<ReviewVersionActivityReason>;
+};
+
+export type SuggestedReviewComparison = {
+  fromVersionId: ReviewVersionId;
+  reason: 'previous-version' | 'reviewer-activity';
+  toVersionId: ReviewVersionId;
+};
+
+export type ReviewVersionOption = {
+  activity?: ReviewVersionActivity;
+  createdAt: string;
+  diffStat?: { additions: number; deletions: number; filesChanged: number };
+  isHead?: boolean;
+  number?: number;
+  previousCreatedAt?: string;
+  previousNumber?: number;
+  range: DiffRange;
+  unavailableReason?: string;
+  versionId: ReviewVersionId;
+};
+
+export type DiffComparisonView = {
+  analysis: DiffComparisonAnalysis;
+  comparison: DiffComparison;
+  files: ReadonlyArray<ChangedFile>;
+  from: ReviewVersionOption;
+  to: ReviewVersionOption;
+};
+
+export type ReviewComparisonState = {
+  aggregate:
+    | { status: 'idle' | 'loading' }
+    | { error: string; status: 'failed' }
+    | { comparison: DiffComparisonView; status: 'ready' };
+  evolution:
+    | { status: 'idle' | 'loading' }
+    | { error: string; status: 'failed' }
+    | { evolution: ReviewCommitEvolution; status: 'ready' };
+  fromVersionId: ReviewVersionId;
+  toVersionId: ReviewVersionId;
+};
+
+export type ReviewVersionEvolutionProgressPhase =
+  | 'reading-stacks'
+  | 'reading-mr-evidence'
+  | 'reading-base-stack'
+  | 'reading-base-evidence'
+  | 'composing-units';
+
+export type ReviewVersionEvolutionProgress = {
+  commits?: ReadonlyArray<ReviewCommitSummary>;
+  completed?: number;
+  exactMatchShas?: ReadonlyArray<GitSha>;
+  message: string;
+  phase: ReviewVersionEvolutionProgressPhase;
+  total?: number;
+};
+
+export type ReviewVersionEvolutionProgressEvent = {
+  progress: ReviewVersionEvolutionProgress;
+  requestId: string;
+};
+
+export type ReviewVersionCompareEndpoint =
+  | { kind: 'base' }
+  | { kind: 'version'; versionId: ReviewVersionId }
+  | { kind: 'head-sha'; sha: GitSha }
+  | {
+      baseSha: GitSha;
+      commentId: string;
+      headSha: GitSha;
+      kind: 'comment-position';
+      startSha: GitSha;
+    };
+
+type ReviewVersionRangeRequest = {
+  from?: ReviewVersionCompareEndpoint;
+  fromVersionId?: ReviewVersionId;
+  source: Extract<ReviewSource, { type: 'pull-request' }>;
+  to?: ReviewVersionCompareEndpoint;
+  toVersionId?: ReviewVersionId;
+};
+
+export type ReviewVersionAggregateRequest = ReviewVersionRangeRequest & {
+  requestId?: string;
+};
+export type ReviewVersionAggregateResult = {
+  versionCompare: DiffComparisonView;
+  warning?: string | null;
+};
+
+export type ReviewVersionEvolutionRequest = ReviewVersionRangeRequest & {
+  requestId?: string;
+};
+export type ReviewVersionEvolutionResult = {
+  versionCommitEvolution: ReviewCommitEvolution;
+  warning?: string | null;
+};
+
+export type ReviewVersionsRequest = {
+  /** Load reviewer activity after the version selector has become usable. */
+  includeActivity?: boolean;
+  source: Extract<ReviewSource, { type: 'pull-request' }>;
+};
+
+export type ReviewVersionsResult = {
+  versions: ReadonlyArray<ReviewVersionOption>;
+  warning?: string | null;
+};
+
+export type ReviewVersionCompareRequest = ReviewVersionAggregateRequest;
+
+export type ReviewVersionCompareResult = {
+  versionCommitEvolution: ReviewCommitEvolution | null;
+  versionCommitEvolutionError: string | null;
+  versionCompare: DiffComparisonView;
+  warning?: string | null;
+};
+
+export type ReviewVersionUnitDiffRequest = {
+  source: Extract<ReviewSource, { type: 'pull-request' }>;
+  unit: ReviewEvolutionUnit;
+};
 
 export type ReviewStrategySummary = {
   confidence: number;
@@ -169,6 +482,7 @@ export type RepositoryState = {
   branch: string | null;
   codeQualityFindings?: ReadonlyArray<PullRequestCodeQualityFinding>;
   commitMetadata?: CommitMetadata;
+  diffStat?: { additions: number; deletions: number; filesChanged: number };
   files: ReadonlyArray<ChangedFile>;
   generalComments?: ReadonlyArray<PullRequestGeneralCommentThread>;
   generatedAt: number;

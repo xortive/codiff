@@ -163,6 +163,19 @@ export function useAppCommands({
       }),
       registry.register({
         description: () =>
+          preferencesRef.current.showWhitespace
+            ? 'Hide whitespace-only changes globally'
+            : 'Show whitespace-only changes globally',
+        execute: () => {
+          void window.codiff
+            .setShowWhitespace(!preferencesRef.current.showWhitespace)
+            .catch(() => {});
+        },
+        id: 'toggle-whitespace',
+        title: 'Toggle Whitespace Changes',
+      }),
+      registry.register({
+        description: () =>
           preferencesRef.current.wordWrap ? 'Disable Word Wrap' : 'Enable Word Wrap',
         execute: onToggleWordWrap,
         id: 'toggle-word-wrap',

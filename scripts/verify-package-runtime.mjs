@@ -12,6 +12,7 @@ const root = process.cwd();
 const runtimeFiles = [
   'electron/github-history-bridge.cjs',
   'electron/gitlab-history-bridge.cjs',
+  'electron/immutable-cache.cjs',
   'electron/walkthrough-generation-bridge.cjs',
   'core/dist/walkthrough-generation.mjs',
   'github/dist/index.mjs',
@@ -129,6 +130,9 @@ try {
     loadGitLabHistory(),
     loadWalkthroughGeneration(),
   ]);
+  if (typeof walkthroughGeneration.generateReviewWalkthrough !== 'function') {
+    throw new Error('Core walkthrough-generation runtime did not load review generation.');
+  }
   if (typeof github.createGitHubArtifactSource !== 'function') {
     throw new Error('GitHub runtime bridge did not load createGitHubArtifactSource.');
   }

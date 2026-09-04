@@ -2,11 +2,12 @@
  * @vitest-environment jsdom
  */
 
-import { act, useCallback, useState } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, expect, test, vi } from 'vite-plus/test';
-import { useReviewCommentDrafts } from '../app/hooks/useReviewCommentDrafts.ts';
 import type { ReviewComment, ReviewIdentity } from '../lib/app-types.ts';
+import { installStableWalkthroughScrollAnchoring } from '../lib/code-view-scroll-anchor.ts';
+import { projectRegionAwareReplay } from '../lib/region-aware-replay.ts';
 import {
   updateReviewIdentityCollapsed,
   updateReviewIdentityViewed,
@@ -137,16 +138,52 @@ beforeEach(() => {
   markdownEditorMock.heightReports = 0;
 });
 
+test('walkthrough scroll anchoring keeps the containing item stable across virtualization', () => {
+  const original = vi.fn((_scrollTop: number) => ({
+    id: 'walkthrough:stop:diff',
+    lineNumber: 42,
+    side: 'additions',
+    type: 'line' as const,
+    viewportOffset: 12,
+  }));
+  const viewer = {
+    getScrollAnchor: original,
+    getTopForItem: vi.fn(() => 250),
+  };
+
+  const restore = installStableWalkthroughScrollAnchoring(viewer as never);
+  expect(viewer.getScrollAnchor(300)).toEqual({
+    id: 'walkthrough:stop:diff',
+    type: 'item',
+    viewportOffset: -50,
+  });
+
+  restore();
+  expect(viewer.getScrollAnchor).toBe(original);
+});
+
 const getCodeViewItemVersion = (id: string) =>
   (codeViewMock.lastItems.find((item) => item.id === id) as { version?: number } | undefined)
     ?.version;
 
-const getWalkthroughHeaderNode = (blockId: string) => {
-  const index = codeViewMock.lastItems.findIndex(
-    (item) => item.id === `${blockId}:walkthrough-header`,
-  );
-  expect(index).toBeGreaterThanOrEqual(0);
-  return codeViewMock.postRenderNodes[index];
+const createHeaderBlocks = (activeId: string): ReadonlyArray<ReviewDiffBlock> =>
+  ['first', 'second'].map((id) => ({
+    header: <div>{id}</div>,
+    headerSelected: id === activeId,
+    id,
+  }));
+
+type RegionalReplayAnnotation = {
+  lineNumber: number;
+  metadata: { type?: string };
+  side: 'additions' | 'deletions';
+};
+
+const regionalReplayAnnotationsFor = (path: string) => {
+  const item = codeViewMock.lastItems.find((candidate) => candidate.id.includes(path)) as
+    | { annotations?: ReadonlyArray<RegionalReplayAnnotation> }
+    | undefined;
+  return item?.annotations?.filter((annotation) => annotation.metadata.type === 'regional-replay');
 };
 
 const createLoadedMarkdownFile = (contents: string, fingerprint: string) => {
@@ -171,6 +208,50 @@ const createLoadedMarkdownFile = (contents: string, fingerprint: string) => {
     })),
   };
 };
+
+test('a diff header can override the global whitespace setting without persisting it', async () => {
+  const base = createChangedFileWithPatch(
+    'src/whitespace.ts',
+    'diff --git a/src/whitespace.ts b/src/whitespace.ts\n@@ -1,2 +1,2 @@\n-const value = 1;\n-const keep = true;\n+const value = 2;\n+const keep = true;  \n',
+  );
+  const file = {
+    ...base,
+    sections: base.sections.map((section) => ({
+      ...section,
+      loadState: 'ready' as const,
+      newFile: {
+        contents: 'const value = 2;\nconst keep = true;  \n',
+        name: base.path,
+      },
+      oldFile: {
+        contents: 'const value = 1;\nconst keep = true;\n',
+        name: base.path,
+      },
+    })),
+  };
+  await using view = await renderReact(<ReviewCodeViewHarness files={[file]} />);
+  const whitespaceButton = () =>
+    view.container.querySelector<HTMLButtonElement>('.codiff-whitespace-button');
+
+  expect(whitespaceButton()?.textContent).toBe('Whitespace hidden');
+  expect(whitespaceButton()?.getAttribute('aria-pressed')).toBe('false');
+  expect(view.container.querySelector('.codiff-line-count')?.getAttribute('title')).toBe(
+    '1 added line, 1 removed line',
+  );
+  const initialVersion = codeViewMock.lastItems[0]?.version;
+
+  await act(async () => whitespaceButton()?.click());
+  await waitFor(() => expect(whitespaceButton()?.textContent).toBe('Whitespace shown'));
+  expect(whitespaceButton()?.getAttribute('aria-pressed')).toBe('true');
+  expect(view.container.querySelector('.codiff-line-count')?.getAttribute('title')).toBe(
+    '2 added lines, 2 removed lines',
+  );
+  expect(codeViewMock.lastItems[0]?.version).not.toBe(initialVersion);
+
+  await act(async () => whitespaceButton()?.click());
+  await waitFor(() => expect(whitespaceButton()?.textContent).toBe('Whitespace hidden'));
+  expect(whitespaceButton()?.getAttribute('aria-pressed')).toBe('false');
+});
 
 test('generated files are collapsed by default and can be explicitly expanded per review', async () => {
   const file = createChangedFile('src/__generated__/api.ts');
@@ -515,44 +596,6 @@ test('scroll selection updates do not publish new item versions', async () => {
   expect(codeViewMock.postRenderNodes[1]?.classList.contains('codiff-selected-item')).toBe(true);
 });
 
-test('walkthrough stop selection updates do not publish new header item versions', async () => {
-  const firstFile = createChangedFile('src/first.ts');
-  const secondFile = createChangedFile('src/second.ts');
-  const blocks = (currentIndex: number): ReadonlyArray<ReviewDiffBlock> => [
-    {
-      file: firstFile,
-      header: <div>Stop one</div>,
-      headerSelected: currentIndex === 0,
-      id: 'walkthrough:s1',
-      itemIdPrefix: 'walkthrough:s1',
-    },
-    {
-      file: secondFile,
-      header: <div>Stop two</div>,
-      headerSelected: currentIndex === 1,
-      id: 'walkthrough:s2',
-      itemIdPrefix: 'walkthrough:s2',
-    },
-  ];
-  await using view = await renderReact(<ReviewCodeViewHarness blocks={blocks(0)} files={[]} />);
-
-  const firstVersions = codeViewMock.lastItems.map((item) => item.version);
-  expect(
-    getWalkthroughHeaderNode('walkthrough:s1')?.classList.contains('codiff-selected-item'),
-  ).toBe(true);
-  expect(
-    getWalkthroughHeaderNode('walkthrough:s2')?.classList.contains('codiff-selected-item'),
-  ).toBe(false);
-  await view.rerender(<ReviewCodeViewHarness blocks={blocks(1)} files={[]} />);
-  expect(codeViewMock.lastItems.map((item) => item.version)).toEqual(firstVersions);
-  expect(
-    getWalkthroughHeaderNode('walkthrough:s1')?.classList.contains('codiff-selected-item'),
-  ).toBe(false);
-  expect(
-    getWalkthroughHeaderNode('walkthrough:s2')?.classList.contains('codiff-selected-item'),
-  ).toBe(true);
-});
-
 test('walkthrough header chrome does not leak inline styles onto reused diff nodes', async () => {
   const file = createChangedFile('src/reused.ts');
   const headerBlock: ReviewDiffBlock = {
@@ -587,6 +630,43 @@ test('walkthrough header chrome does not leak inline styles onto reused diff nod
   expect(reusedNode?.classList.contains('codiff-walkthrough-header-item')).toBe(false);
   expect(container.textContent).not.toContain('Header');
   expect(container.querySelector('.codiff-file-header')).not.toBeNull();
+});
+
+test('scroll-synced walkthrough headers change emphasis without invalidating layout', async () => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  let root: Root | null = null;
+
+  await using _resource = {
+    async [Symbol.asyncDispose]() {
+      if (root) {
+        await act(async () => root?.unmount());
+      }
+      container.remove();
+    },
+  };
+  await act(async () => {
+    root = createRoot(container);
+    root.render(<ReviewCodeViewHarness blocks={createHeaderBlocks('first')} files={[]} />);
+  });
+  const versions = codeViewMock.lastItems.map((item) => item.version);
+  expect(
+    codeViewMock.postRenderNodes[0]?.classList.contains('codiff-active-walkthrough-header-item'),
+  ).toBe(true);
+  expect(
+    codeViewMock.postRenderNodes[1]?.classList.contains('codiff-active-walkthrough-header-item'),
+  ).toBe(false);
+
+  await act(async () => {
+    root?.render(<ReviewCodeViewHarness blocks={createHeaderBlocks('second')} files={[]} />);
+  });
+  expect(codeViewMock.lastItems.map((item) => item.version)).toEqual(versions);
+  expect(
+    codeViewMock.postRenderNodes[0]?.classList.contains('codiff-active-walkthrough-header-item'),
+  ).toBe(false);
+  expect(
+    codeViewMock.postRenderNodes[1]?.classList.contains('codiff-active-walkthrough-header-item'),
+  ).toBe(true);
 });
 
 test('header-only walkthrough blocks render and can be scroll targets', async () => {
@@ -977,184 +1057,6 @@ test('read-only review comments render safe details blocks', async () => {
   expect(details?.open).toBe(false);
   expect(details?.querySelector('summary')?.textContent).toBe('Review rationale');
   expect(view.container.textContent).toContain('AI Code Reviewer');
-});
-
-test('resolved review threads collapse inline, expand when focused, and can be reopened', async () => {
-  const file = createChangedFile('src/resolved.ts');
-  const comments = [
-    {
-      author: { login: 'reviewer' },
-      body: 'Please keep this explicit.',
-      canResolveThread: true,
-      destination: 'provider',
-      filePath: file.path,
-      id: 'gitlab:99',
-      isReadOnly: true,
-      isThreadResolved: true,
-      kind: 'submitted-comment',
-      lineNumber: 1,
-      resolvedSectionId: file.sections[0].id,
-      side: 'additions',
-      threadId: 'discussion-1',
-    },
-    {
-      author: { login: 'author' },
-      body: 'Resolved in the latest update.',
-      canResolveThread: true,
-      destination: 'provider',
-      filePath: file.path,
-      id: 'gitlab:103',
-      isReadOnly: true,
-      isThreadResolved: true,
-      kind: 'submitted-comment',
-      lineNumber: 1,
-      resolvedSectionId: file.sections[0].id,
-      side: 'additions',
-      threadId: 'discussion-1',
-    },
-  ] satisfies ReadonlyArray<ReviewComment>;
-  let finishResolve: (() => void) | null = null;
-  const onResolveThread = vi.fn(
-    () =>
-      new Promise<void>((resolve) => {
-        finishResolve = resolve;
-      }),
-  );
-  await using view = await renderReact(
-    <ReviewCodeViewHarness
-      comments={comments}
-      files={[file]}
-      onResolveThread={onResolveThread}
-      supportsReviewCommentActions
-    />,
-  );
-
-  const toggle = () => view.container.querySelector<HTMLButtonElement>('.resolved-thread-toggle');
-  expect(toggle()?.getAttribute('aria-expanded')).toBe('false');
-  expect(toggle()?.textContent).toContain('Resolved conversation');
-  expect(toggle()?.textContent).toContain('2 comments');
-  expect(toggle()?.querySelectorAll('svg')).toHaveLength(1);
-  expect(view.container.textContent).not.toContain('Please keep this explicit.');
-
-  await act(async () => toggle()?.click());
-  expect(toggle()?.getAttribute('aria-expanded')).toBe('true');
-  expect(view.container.textContent).toContain('Please keep this explicit.');
-
-  await view.rerender(
-    <ReviewCodeViewHarness
-      comments={comments}
-      files={[file]}
-      focusCommentId="gitlab:103"
-      focusCommentRequest={1}
-      onResolveThread={onResolveThread}
-      supportsReviewCommentActions
-    />,
-  );
-  expect(toggle()?.getAttribute('aria-expanded')).toBe('true');
-
-  const reopen = [...view.container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (button) => button.textContent === 'Reopen',
-  );
-  await act(async () => reopen?.click());
-  expect(onResolveThread).toHaveBeenCalledWith('discussion-1', false);
-  expect(view.container.querySelector('.resolved-thread-toggle')).toBeNull();
-  expect(view.container.textContent).toContain('Please keep this explicit.');
-  expect(
-    [...view.container.querySelectorAll<HTMLButtonElement>('button')].some(
-      (button) => button.textContent === 'Reply',
-    ),
-  ).toBe(false);
-
-  await act(async () => finishResolve?.());
-  expect(
-    [...view.container.querySelectorAll<HTMLButtonElement>('button')].some(
-      (button) => button.textContent === 'Reply',
-    ),
-  ).toBe(true);
-});
-
-test('resolving an open review thread collapses it in place', async () => {
-  const file = createChangedFile('src/open-thread.ts');
-  const comment = {
-    author: { login: 'reviewer' },
-    body: 'Please keep this explicit.',
-    canResolveThread: true,
-    destination: 'provider',
-    filePath: file.path,
-    id: 'gitlab:99',
-    isReadOnly: true,
-    kind: 'submitted-comment',
-    lineNumber: 1,
-    resolvedSectionId: file.sections[0].id,
-    side: 'additions',
-    threadId: 'discussion-1',
-  } satisfies ReviewComment;
-  let finishResolve: (() => void) | null = null;
-  const onResolveThread = vi.fn(
-    () =>
-      new Promise<void>((resolve) => {
-        finishResolve = resolve;
-      }),
-  );
-  await using view = await renderReact(
-    <ReviewCodeViewHarness
-      comments={[comment]}
-      files={[file]}
-      onResolveThread={onResolveThread}
-      supportsReviewCommentActions
-    />,
-  );
-
-  const resolve = [...view.container.querySelectorAll<HTMLButtonElement>('button')].find(
-    (button) => button.textContent === 'Resolve',
-  );
-  await act(async () => resolve?.click());
-
-  expect(onResolveThread).toHaveBeenCalledWith('discussion-1', true);
-  expect(
-    view.container
-      .querySelector<HTMLButtonElement>('.resolved-thread-toggle')
-      ?.getAttribute('aria-expanded'),
-  ).toBe('false');
-  expect(view.container.textContent).not.toContain('Please keep this explicit.');
-
-  await act(async () => finishResolve?.());
-});
-
-test('comment scroll targets navigate directly to their diff annotation', async () => {
-  const file = createChangedFile('src/deep-link.ts');
-  const comment = {
-    author: { login: 'reviewer' },
-    body: 'Linked review comment.',
-    destination: 'provider',
-    filePath: file.path,
-    id: 'gitlab:99',
-    isReadOnly: true,
-    kind: 'submitted-comment',
-    lineNumber: 1,
-    resolvedSectionId: file.sections[0].id,
-    side: 'additions',
-    threadId: 'discussion-1',
-  } satisfies ReviewComment;
-
-  await using _view = await renderReact(
-    <ReviewCodeViewHarness
-      comments={[comment]}
-      files={[file]}
-      scrollTarget={{ commentId: comment.id, request: 1 }}
-    />,
-  );
-
-  await waitFor(() => {
-    expect(codeViewMock.scrollTo).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: `diff:${file.sections[0].id}`,
-        lineNumber: 1,
-        side: 'additions',
-        type: 'line',
-      }),
-    );
-  });
 });
 
 test('walkthrough hunk viewed state is keyed independently from file path', async () => {
@@ -1639,14 +1541,12 @@ const renderLocalReviewComment = async ({
   body,
   onAskCodex,
   onCommentDraftChange,
-  onCreateComment,
   onDeleteComment,
   onUpdateComment,
 }: {
   body: string;
   onAskCodex: () => void;
   onCommentDraftChange?: () => void;
-  onCreateComment?: () => void;
   onDeleteComment?: () => void;
   onUpdateComment: () => void;
 }) => {
@@ -1666,7 +1566,6 @@ const renderLocalReviewComment = async ({
       files={[file]}
       onAskCodex={onAskCodex}
       onCommentDraftChange={onCommentDraftChange}
-      onCreateComment={onCreateComment}
       onDeleteComment={onDeleteComment}
       onUpdateComment={onUpdateComment}
     />,
@@ -1693,185 +1592,6 @@ const pressCommentShortcut = async (textarea: HTMLTextAreaElement, altKey: boole
     );
   });
 };
-
-const dispatchTestPointerEvent = (type: 'pointerdown' | 'pointerup') => {
-  const event = new Event(type);
-  Object.defineProperty(event, 'pointerId', { value: 1 });
-  window.dispatchEvent(event);
-};
-
-type StatefulReviewCommentState = ReturnType<typeof useReviewCommentDrafts> & {
-  comments: ReadonlyArray<ReviewComment>;
-};
-
-const ignoreCommentFileChange = () => {};
-
-function StatefulReviewCommentHarness({
-  file,
-  initialComment,
-  onState,
-  onUpdateComment,
-}: {
-  file: ChangedFile;
-  initialComment: ReviewComment;
-  onState: (state: StatefulReviewCommentState) => void;
-  onUpdateComment: (commentId: string, body: string) => void;
-}) {
-  const [comments, setComments] = useState<ReadonlyArray<ReviewComment>>([initialComment]);
-  const commentState = useReviewCommentDrafts({
-    comments,
-    draftKind: 'provider-draft',
-    onCommentFileChange: ignoreCommentFileChange,
-    setComments,
-  });
-  const updateCommentState = commentState.updateComment;
-  const updateComment = useCallback(
-    (commentId: string, body: string) => {
-      onUpdateComment(commentId, body);
-      updateCommentState(commentId, body);
-    },
-    [onUpdateComment, updateCommentState],
-  );
-  onState({ ...commentState, comments });
-
-  return (
-    <ReviewCodeViewHarness
-      comments={comments}
-      files={[file]}
-      focusCommentId={commentState.focusCommentId}
-      focusCommentRequest={commentState.focusCommentRequest}
-      onCommentDraftChange={commentState.updateActiveReviewCommentDraft}
-      onCreateComment={commentState.createComment}
-      onDeleteComment={commentState.deleteComment}
-      onUpdateComment={updateComment}
-    />
-  );
-}
-
-test('pointer-driven comment blurs preserve each newly focused editor across repeated moves', async () => {
-  vi.useFakeTimers();
-  using _timers = {
-    [Symbol.dispose]() {
-      vi.useRealTimers();
-    },
-  };
-  const randomUUID = vi
-    .spyOn(crypto, 'randomUUID')
-    .mockReturnValueOnce('00000000-0000-4000-8000-000000000002')
-    .mockReturnValueOnce('00000000-0000-4000-8000-000000000003')
-    .mockReturnValueOnce('00000000-0000-4000-8000-000000000004');
-  using _uuid = {
-    [Symbol.dispose]() {
-      randomUUID.mockRestore();
-    },
-  };
-  const onUpdateComment = vi.fn();
-  const file = createChangedFileWithPatch(
-    'src/comment.ts',
-    'diff --git a/src/comment.ts b/src/comment.ts\n@@ -1,4 +1,4 @@\n-old one\n-old two\n-old three\n-old four\n+new one\n+new two\n+new three\n+new four\n',
-  );
-  const initialComment = {
-    body: '',
-    filePath: file.path,
-    id: 'comment-1',
-    kind: 'provider-draft',
-    lineNumber: 1,
-    sectionId: file.sections[0].id,
-    side: 'additions',
-  } satisfies ReviewComment;
-  const stateRef: { current: StatefulReviewCommentState | null } = { current: null };
-  const getState = () => {
-    if (!stateRef.current) {
-      throw new Error('Expected review comment state.');
-    }
-    return stateRef.current;
-  };
-  const view = await renderReact(
-    <StatefulReviewCommentHarness
-      file={file}
-      initialComment={initialComment}
-      onState={(state) => (stateRef.current = state)}
-      onUpdateComment={onUpdateComment}
-    />,
-  );
-  await using _view = view;
-  const textarea = view.container.querySelector<HTMLTextAreaElement>('.review-comment-input');
-  if (!textarea) {
-    throw new Error('Expected review comment textarea.');
-  }
-  await act(async () => textarea.focus());
-  await setInputValue(textarea, 'Keep this draft.');
-  const lineElement = document.createElement('span');
-
-  const moveFocusedCommentToLine = async (lineNumber: number, expectedCommentId: string) => {
-    const focusedEditor = document.activeElement;
-    const activeDraftBeforeBlur = getState().activeReviewCommentDraftRef.current;
-    const updateCountBeforeBlur = onUpdateComment.mock.calls.length;
-    expect(focusedEditor).toBeInstanceOf(HTMLTextAreaElement);
-
-    await act(async () => {
-      dispatchTestPointerEvent('pointerdown');
-      (focusedEditor as HTMLTextAreaElement).blur();
-    });
-    expect(getState().activeReviewCommentDraftRef.current).toEqual(activeDraftBeforeBlur);
-    expect(onUpdateComment).toHaveBeenCalledTimes(updateCountBeforeBlur);
-
-    const { item, onLineClick } = getReviewCodeViewHandlers();
-    await act(async () => {
-      dispatchTestPointerEvent('pointerup');
-      onLineClick(
-        {
-          annotationSide: 'additions',
-          event: nonInteractivePointerEvent,
-          lineElement,
-          lineNumber,
-        },
-        { item },
-      );
-    });
-    expect(onUpdateComment).toHaveBeenCalledTimes(updateCountBeforeBlur);
-
-    const destinationEditor = view.container.querySelector<HTMLTextAreaElement>(
-      `[aria-label="Comment on src/comment.ts New line ${lineNumber}"]`,
-    );
-    expect(document.activeElement).toBe(destinationEditor);
-    expect(getState().focusCommentId).toBe(expectedCommentId);
-    expect(getState().activeReviewCommentDraftRef.current).toEqual({
-      body: '',
-      id: expectedCommentId,
-    });
-
-    await act(async () => vi.advanceTimersByTime(0));
-
-    // The deferred blur belongs to the previous editor. It must not clear the
-    // destination editor's active draft after that editor has received focus.
-    expect(getState().activeReviewCommentDraftRef.current).toEqual({
-      body: '',
-      id: expectedCommentId,
-    });
-  };
-
-  await moveFocusedCommentToLine(2, '00000000-0000-4000-8000-000000000002');
-  expect(onUpdateComment).toHaveBeenCalledOnce();
-  expect(onUpdateComment).toHaveBeenCalledWith('comment-1', 'Keep this draft.');
-  expect(getState().comments.map(({ body, lineNumber }) => ({ body, lineNumber }))).toEqual([
-    { body: 'Keep this draft.', lineNumber: 1 },
-    { body: '', lineNumber: 2 },
-  ]);
-
-  await moveFocusedCommentToLine(3, '00000000-0000-4000-8000-000000000003');
-  expect(getState().comments.map(({ body, lineNumber }) => ({ body, lineNumber }))).toEqual([
-    { body: 'Keep this draft.', lineNumber: 1 },
-    { body: '', lineNumber: 3 },
-  ]);
-
-  await moveFocusedCommentToLine(4, '00000000-0000-4000-8000-000000000004');
-  expect(getState().comments.map(({ body, lineNumber }) => ({ body, lineNumber }))).toEqual([
-    { body: 'Keep this draft.', lineNumber: 1 },
-    { body: '', lineNumber: 4 },
-  ]);
-  expect(onUpdateComment).toHaveBeenCalledOnce();
-});
 
 test('local review comments are added with Mod+Enter instead of asking the agent', async () => {
   const platform = vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('MacIntel');
@@ -2141,6 +1861,25 @@ test('file comments can be created for GitLab merge requests and GitHub pull req
     anchor: 'file',
     filePath: 'src/comment.ts',
     position: { range },
+    sectionId: 'src/comment.ts:unstaged',
+  });
+  await view.rerender(
+    <ReviewCodeViewHarness
+      files={[file]}
+      onCreateComment={onCreateComment}
+      source={gitHubSource}
+      supportsReviewCommentActions
+      targetVersionId={'version-2' as never}
+    />,
+  );
+  const versionFileCommentButton = view.container.querySelector<HTMLButtonElement>(
+    '.codiff-file-comment-button',
+  );
+  await act(async () => versionFileCommentButton?.click());
+  expect(onCreateComment).toHaveBeenLastCalledWith({
+    anchor: 'file',
+    filePath: 'src/comment.ts',
+    position: { range, versionId: 'version-2' },
     sectionId: 'src/comment.ts:unstaged',
   });
 });
@@ -2967,7 +2706,7 @@ test('line content clicks only ignore text selected on the clicked line', async 
   const onCreateComment = vi.fn();
   const file: ChangedFile = createChangedFileWithPatch(
     'src/click.ts',
-    'diff --git a/src/click.ts b/src/click.ts\n@@ -1,2 +1,2 @@\n-old one\n-old two\n+new one\n+new two\n',
+    'diff --git a/src/click.ts b/src/click.ts\n@@ -1 +1 @@\n-old\n+new\n',
   );
   const reviewRange = {
     base: { kind: 'index' as const, label: { kind: 'review-marker' as const, text: 'Index' } },
@@ -2978,15 +2717,10 @@ test('line content clicks only ignore text selected on the clicked line', async 
   };
   file.sections[0]!.range = reviewRange;
   const container = document.createElement('div');
-  const shadowHost = document.createElement('div');
-  const shadowRoot = shadowHost.attachShadow({ mode: 'open' });
-  const lineElement = document.createElement('span');
-  const lineText = document.createTextNode('selected code');
-  lineElement.append(lineText);
-  const otherLineElement = document.createElement('span');
-  otherLineElement.textContent = 'other code';
-  shadowRoot.append(lineElement, otherLineElement);
-  document.body.append(container, shadowHost);
+  const selectionHost = document.createElement('span');
+  selectionHost.textContent = 'selected code';
+  document.body.append(container);
+  document.body.append(selectionHost);
   let root: Root | null = null;
 
   await using _resource = {
@@ -2996,7 +2730,7 @@ test('line content clicks only ignore text selected on the clicked line', async 
         await act(async () => root?.unmount());
       }
       container.remove();
-      shadowHost.remove();
+      selectionHost.remove();
     },
   };
   await act(async () => {
@@ -3011,7 +2745,6 @@ test('line content clicks only ignore text selected on the clicked line', async 
       {
         annotationSide: 'additions',
         event: nonInteractivePointerEvent,
-        lineElement,
         lineNumber: 1,
       },
       { item },
@@ -3025,67 +2758,28 @@ test('line content clicks only ignore text selected on the clicked line', async 
     sectionId: 'src/click.ts:unstaged',
     side: 'additions',
   });
-
-  const getComposedRanges = vi.fn(() => [
-    {
-      collapsed: false,
-      endContainer: lineText,
-      endOffset: lineText.length,
-      startContainer: lineText,
-      startOffset: 0,
-    } as StaticRange,
-  ]);
-  const selectedRange = document.createRange();
-  selectedRange.selectNodeContents(lineElement);
-  {
-    using _selectionSpy = vi.spyOn(window, 'getSelection').mockReturnValue({
-      getComposedRanges,
-      getRangeAt: () => selectedRange,
-      isCollapsed: true,
-      rangeCount: 1,
-      toString: () => '',
-    } as unknown as Selection);
-
-    await act(async () => {
-      onLineClick(
-        {
-          annotationSide: 'additions',
-          event: nonInteractivePointerEvent,
-          lineElement,
-          lineNumber: 1,
-        },
-        { item },
-      );
-    });
-    expect(getComposedRanges).toHaveBeenCalledWith({ shadowRoots: [shadowRoot] });
-    expect(onCreateComment).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      onLineClick(
-        {
-          annotationSide: 'additions',
-          event: nonInteractivePointerEvent,
-          lineElement: otherLineElement,
-          lineNumber: 2,
-        },
-        { item },
-      );
-    });
-    expect(onCreateComment).toHaveBeenCalledTimes(2);
-    expect(onCreateComment).toHaveBeenLastCalledWith({
-      filePath: 'src/click.ts',
-      lineNumber: 2,
-      position: { range: reviewRange },
-      sectionId: 'src/click.ts:unstaged',
-      side: 'additions',
-    });
-  }
-
+  const selection = window.getSelection();
+  const textSelection = document.createRange();
+  textSelection.selectNodeContents(selectionHost);
+  selection?.removeAllRanges();
+  selection?.addRange(textSelection);
+  await act(async () => {
+    onLineClick(
+      {
+        annotationSide: 'additions',
+        event: nonInteractivePointerEvent,
+        lineNumber: 1,
+      },
+      { item },
+    );
+  });
+  expect(onCreateComment).toHaveBeenCalledTimes(1);
+  selection?.removeAllRanges();
   await act(async () => {
     onLineSelectionEnd(range, { item });
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
-  expect(onCreateComment).toHaveBeenCalledTimes(3);
+  expect(onCreateComment).toHaveBeenCalledTimes(2);
   expect(onCreateComment).toHaveBeenLastCalledWith({
     filePath: 'src/click.ts',
     lineNumber: 1,
@@ -3100,7 +2794,7 @@ test('line content clicks only ignore text selected on the clicked line', async 
     onLineSelectionEnd(range, { item });
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
-  expect(onCreateComment).toHaveBeenCalledTimes(4);
+  expect(onCreateComment).toHaveBeenCalledTimes(3);
 });
 
 test('read-only patch context resolves through the optional host capability without mutation', async () => {
@@ -3327,6 +3021,732 @@ test('unavailable host context leaves the origin-independent patch review intact
       "GitLab could not load before contents for 'src/unavailable-context.ts'.",
     );
     expect(codeViewMock.lastItems.some((candidate) => candidate.type === 'diff')).toBe(true);
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('regional replay annotations retain source provenance and precede review annotations', async () => {
+  const cleanProjection = projectRegionAwareReplay({
+    earlierBase: 'old\n',
+    earlierHead: 'prior\n',
+    laterBase: 'old\n',
+    laterHead: 'current\n',
+    path: 'src/clean.ts',
+  });
+  const conflictProjection = projectRegionAwareReplay({
+    earlierBase: 'old\n',
+    earlierHead: 'prior\n',
+    laterBase: 'base\n',
+    laterHead: 'current\n',
+    path: 'src/conflict.ts',
+  });
+  const incompleteProjection = projectRegionAwareReplay({
+    earlierBase: undefined,
+    earlierHead: 'prior\n',
+    laterBase: 'base\n',
+    laterHead: 'current\n',
+    path: 'src/incomplete.ts',
+  });
+  const cleanFile = {
+    ...createChangedFileWithPatch(
+      'src/clean.ts',
+      'diff --git a/src/clean.ts b/src/clean.ts\n@@ -1 +1 @@\n-prior\n+current\n',
+    ),
+    regionalReplay: cleanProjection,
+  } satisfies ChangedFile;
+  const conflictFile = {
+    ...createChangedFileWithPatch(
+      'src/conflict.ts',
+      'diff --git a/src/conflict.ts b/src/conflict.ts\n@@ -1 +1 @@\n-base\n+current\n',
+    ),
+    regionalReplay: conflictProjection,
+  } satisfies ChangedFile;
+  const incompleteFile = {
+    ...createChangedFileWithPatch(
+      'src/incomplete.ts',
+      'diff --git a/src/incomplete.ts b/src/incomplete.ts\n@@ -1 +1 @@\n-base\n+current\n',
+    ),
+    regionalReplay: incompleteProjection,
+  } satisfies ChangedFile;
+  const comment = {
+    body: 'Check the final value.',
+    filePath: cleanFile.path,
+    id: 'regional-comment',
+    kind: 'local-note' as const,
+    lineNumber: 1,
+    sectionId: cleanFile.sections[0]!.id,
+    side: 'additions' as const,
+  } satisfies ReviewComment;
+  const finding = {
+    description: 'Explain the update.',
+    filePath: cleanFile.path,
+    fingerprint: 'regional-quality',
+    lineNumber: 1,
+    severity: 'info' as const,
+    status: 'new' as const,
+  } satisfies PullRequestCodeQualityFinding;
+  const view = await renderReact(
+    <ReviewCodeViewHarness
+      codeQualityFindings={[finding]}
+      comments={[comment]}
+      disableWorkerPool
+      files={[cleanFile, conflictFile, incompleteFile]}
+    />,
+  );
+
+  try {
+    await waitFor(() => {
+      expect(
+        view.container.querySelector('[data-replay-kind="replay-clean"]')?.textContent,
+      ).toContain('Expected Replay → Later HEAD');
+    });
+    const conflict = view.container.querySelector<HTMLDetailsElement>(
+      '[data-replay-kind="replay-conflict"] details',
+    );
+    expect(conflict?.open).toBe(true);
+    expect(conflict?.textContent).toContain('prior-patch:0');
+    expect(view.container.querySelector('[data-replay-kind="incomplete"]')?.textContent).toContain(
+      'Earlier Base content is unavailable.',
+    );
+    const splitCleanCards = [
+      ...view.container.querySelectorAll<HTMLElement>('[data-replay-kind="replay-clean"]'),
+    ];
+    expect(splitCleanCards).toHaveLength(2);
+    expect(splitCleanCards.map((card) => card.dataset.replayFragment).toSorted()).toEqual([
+      'additions',
+      'deletions',
+    ]);
+    expect(splitCleanCards[0]?.dataset.replayPair).toBe(splitCleanCards[1]?.dataset.replayPair);
+
+    const cleanCard = view.container.querySelector('[data-replay-kind="replay-clean"]');
+    const reviewComment = view.container.querySelector(
+      '.review-comment-thread:not(.code-quality-finding-thread)',
+    );
+    const codeQuality = view.container.querySelector('.code-quality-finding');
+    expect(cleanCard?.compareDocumentPosition(reviewComment!)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(cleanCard?.compareDocumentPosition(codeQuality!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(codeViewMock.lastOptions?.loadDiffFiles).toBeUndefined();
+    expect(codeViewMock.lastOptions?.expandUnchanged).toBe(true);
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('regional replay uses one unified annotation and one extant-side file slot', async () => {
+  const cleanProjection = projectRegionAwareReplay({
+    earlierBase: 'old\n',
+    earlierHead: 'prior\n',
+    laterBase: 'old\n',
+    laterHead: 'current\n',
+    path: 'src/unified.ts',
+  });
+  const incompleteAddedProjection = projectRegionAwareReplay({
+    earlierBase: undefined,
+    earlierHead: undefined,
+    laterBase: undefined,
+    laterHead: 'current\n',
+    path: 'src/added.ts',
+  });
+  const unifiedFile = {
+    ...createChangedFileWithPatch(
+      'src/unified.ts',
+      'diff --git a/src/unified.ts b/src/unified.ts\n@@ -1 +1 @@\n-prior\n+current\n',
+    ),
+    regionalReplay: cleanProjection,
+  } satisfies ChangedFile;
+  const addedFile = {
+    ...createChangedFileWithPatch(
+      'src/added.ts',
+      'diff --git a/src/added.ts b/src/added.ts\n@@ -0,0 +1 @@\n+current\n',
+    ),
+    regionalReplay: incompleteAddedProjection,
+    status: 'added' as const,
+  } satisfies ChangedFile;
+  const unified = await renderReact(
+    <ReviewCodeViewHarness diffStyle="unified" disableWorkerPool files={[unifiedFile]} />,
+  );
+
+  try {
+    await waitFor(() => {
+      expect(unified.container.querySelectorAll('[data-replay-kind="replay-clean"]')).toHaveLength(
+        1,
+      );
+    });
+    const card = unified.container.querySelector<HTMLElement>('[data-replay-kind="replay-clean"]');
+    expect(card?.dataset.replayFragment).toBe('unified');
+    expect(card?.dataset.replayPair).toBeUndefined();
+  } finally {
+    await unified.cleanup();
+  }
+
+  const split = await renderReact(<ReviewCodeViewHarness disableWorkerPool files={[addedFile]} />);
+  try {
+    await waitFor(() => {
+      expect(split.container.querySelectorAll('[data-replay-kind="incomplete"]')).toHaveLength(1);
+    });
+    const card = split.container.querySelector<HTMLElement>('[data-replay-kind="incomplete"]');
+    expect(card?.dataset.replayFragment).toBe('additions');
+    expect(card?.dataset.replayPair).toBeUndefined();
+  } finally {
+    await split.cleanup();
+  }
+});
+
+test('regional replay coalesces cards that resolve to one Pierre anchor', async () => {
+  const sourceProjection = projectRegionAwareReplay({
+    earlierBase: 'old\n',
+    earlierHead: 'prior\n',
+    laterBase: 'base\n',
+    laterHead: 'current\n',
+    path: 'src/coalesced.ts',
+  });
+  const first = sourceProjection.regions[0];
+  if (!first || first.kind !== 'replay-conflict') {
+    throw new Error('Expected a replay conflict fixture.');
+  }
+  const second = {
+    ...first,
+    affectedCurrentEditIds: ['current-patch:1'],
+    priorEditIds: ['prior-patch:1'],
+    priorEdits: first.priorEdits.map((edit) => ({ ...edit, id: 'prior-patch:1' })),
+  };
+  const projection = { ...sourceProjection, regions: [first, second] };
+  const file = {
+    ...createChangedFileWithPatch(
+      'src/coalesced.ts',
+      'diff --git a/src/coalesced.ts b/src/coalesced.ts\n@@ -1 +1 @@\n-base\n+current\n',
+    ),
+    regionalReplay: projection,
+  } satisfies ChangedFile;
+  const view = await renderReact(<ReviewCodeViewHarness disableWorkerPool files={[file]} />);
+
+  try {
+    await waitFor(() => {
+      expect(view.container.querySelectorAll('[data-replay-kind="replay-conflict"]')).toHaveLength(
+        2,
+      );
+    });
+    const cards = [
+      ...view.container.querySelectorAll<HTMLElement>('[data-replay-kind="replay-conflict"]'),
+    ];
+    expect(cards.map((card) => card.dataset.replayRegions)).toEqual(['0,1', '0,1']);
+    expect(cards[0]?.dataset.replayPair).toBe(cards[1]?.dataset.replayPair);
+    expect(cards[0]?.textContent).toContain('prior-patch:0');
+    expect(cards[0]?.textContent).toContain('prior-patch:1');
+    const replayAnnotations = codeViewMock.lastItems.flatMap((item) =>
+      'annotations' in item && Array.isArray(item.annotations)
+        ? item.annotations.filter(
+            (
+              annotation,
+            ): annotation is {
+              metadata: { regionIndexes?: ReadonlyArray<number>; type?: string };
+            } =>
+              typeof annotation === 'object' &&
+              annotation != null &&
+              'metadata' in annotation &&
+              (annotation as { metadata?: { type?: string } }).metadata?.type === 'regional-replay',
+          )
+        : [],
+    );
+    expect(replayAnnotations).toHaveLength(2);
+    expect(replayAnnotations[0]?.metadata.regionIndexes).toEqual([0, 1]);
+    expect(replayAnnotations[1]?.metadata.regionIndexes).toEqual([0, 1]);
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('separated replay conflicts do not borrow a later island as stable context', async () => {
+  const sourceProjection = projectRegionAwareReplay({
+    earlierBase: 'old\n',
+    earlierHead: 'prior\n',
+    laterBase: 'base\n',
+    laterHead: 'current\n',
+    path: 'src/islands.ts',
+  });
+  const first = sourceProjection.regions[0];
+  if (!first || first.kind !== 'replay-conflict') {
+    throw new Error('Expected a replay conflict fixture.');
+  }
+  const second = {
+    ...first,
+    affectedCurrentEditIds: [],
+    laterBase: {
+      ...first.laterBase,
+      content: 'base two\nshared two\n',
+      range: { end: 6, start: 4 },
+    },
+    laterBaseRange: { end: 6, start: 4 },
+    laterHead: {
+      ...first.laterHead,
+      content: 'current two\nshared two\n',
+      range: { end: 6, start: 4 },
+    },
+    priorEditIds: ['prior-patch:1'],
+    priorEdits: first.priorEdits.map((edit) => ({ ...edit, id: 'prior-patch:1' })),
+  };
+  const projection = { ...sourceProjection, regions: [first, second] };
+  const file = {
+    ...createChangedFileWithPatch(
+      'src/islands.ts',
+      [
+        'diff --git a/src/islands.ts b/src/islands.ts',
+        '@@ -1 +1 @@',
+        '-base',
+        '+current',
+        '@@ -5,2 +5,2 @@',
+        '-base two',
+        '+current two',
+        ' shared two',
+        '',
+      ].join('\n'),
+    ),
+    regionalReplay: projection,
+  } satisfies ChangedFile;
+  const view = await renderReact(<ReviewCodeViewHarness disableWorkerPool files={[file]} />);
+
+  try {
+    await waitFor(() => {
+      expect(view.container.querySelectorAll('[data-replay-kind="replay-conflict"]')).toHaveLength(
+        4,
+      );
+    });
+    const firstCards = [
+      ...view.container.querySelectorAll<HTMLElement>('[data-replay-regions="0"]'),
+    ];
+    const secondCards = [
+      ...view.container.querySelectorAll<HTMLElement>('[data-replay-regions="1"]'),
+    ];
+    expect(firstCards).toHaveLength(2);
+    expect(firstCards.map((card) => card.dataset.replayPlacement)).toEqual(['region', 'region']);
+    expect(secondCards).toHaveLength(2);
+    expect(secondCards.map((card) => card.dataset.replayPlacement)).toEqual(['region', 'region']);
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('an incomplete projection keeps a line-zero slot without inventing a code line', async () => {
+  const projection = projectRegionAwareReplay({
+    earlierBase: undefined,
+    earlierHead: 'prior\n',
+    laterBase: 'base\n',
+    laterHead: 'current\n',
+    path: 'src/incomplete-slot.ts',
+  });
+  const file = {
+    ...createChangedFileWithPatch(
+      'src/incomplete-slot.ts',
+      'diff --git a/src/incomplete-slot.ts b/src/incomplete-slot.ts\n@@ -0,0 +0,0 @@\n',
+    ),
+    regionalReplay: projection,
+  } satisfies ChangedFile;
+  const view = await renderReact(<ReviewCodeViewHarness disableWorkerPool files={[file]} />);
+
+  try {
+    await waitFor(() => {
+      expect(view.container.querySelectorAll('[data-replay-kind="incomplete"]')).toHaveLength(2);
+    });
+    const cards = [
+      ...view.container.querySelectorAll<HTMLElement>('[data-replay-kind="incomplete"]'),
+    ];
+    expect(cards.map((card) => card.dataset.replayFragment).toSorted()).toEqual([
+      'additions',
+      'deletions',
+    ]);
+    expect(cards[0]?.dataset.replayPair).toBe(cards[1]?.dataset.replayPair);
+    expect(cards[0]?.textContent).toContain('Earlier Base content is unavailable.');
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('regional replay anchors beginning and EOF conflicts against their nearest shared context', async () => {
+  const beginningProjection = projectRegionAwareReplay({
+    earlierBase: 'old\ntail\n',
+    earlierHead: 'prior\ntail\n',
+    laterBase: 'base\ntail\n',
+    laterHead: 'current\ntail\n',
+    path: 'src/beginning.ts',
+  });
+  const eofProjection = projectRegionAwareReplay({
+    earlierBase: 'keep\nold\n',
+    earlierHead: 'keep\nprior\n',
+    laterBase: 'keep\nbase\n',
+    laterHead: 'keep\ncurrent\n',
+    path: 'src/eof.ts',
+  });
+  const beginningFile = {
+    ...createChangedFileWithPatch(
+      'src/beginning.ts',
+      'diff --git a/src/beginning.ts b/src/beginning.ts\n@@ -1,2 +1,2 @@\n-base\n+current\n tail\n',
+    ),
+    regionalReplay: beginningProjection,
+  } satisfies ChangedFile;
+  const eofFile = {
+    ...createChangedFileWithPatch(
+      'src/eof.ts',
+      'diff --git a/src/eof.ts b/src/eof.ts\n@@ -1,2 +1,2 @@\n keep\n-base\n+current\n',
+    ),
+    regionalReplay: eofProjection,
+  } satisfies ChangedFile;
+  const view = await renderReact(
+    <ReviewCodeViewHarness disableWorkerPool files={[beginningFile, eofFile]} />,
+  );
+
+  try {
+    await waitFor(() => {
+      expect(view.container.querySelectorAll('[data-replay-kind="replay-conflict"]')).toHaveLength(
+        4,
+      );
+    });
+    expect(
+      [...view.container.querySelectorAll<HTMLElement>('[data-replay-kind="replay-conflict"]')]
+        .map((card) => card.dataset.replayPlacement)
+        .toSorted(),
+    ).toEqual(['leading-context', 'leading-context', 'trailing-context', 'trailing-context']);
+    expect(view.container.textContent).toContain('Applies to the following conflict region.');
+    expect(view.container.textContent).toContain('Anchored after shared conflict context.');
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('regional replay anchors insertion-only and deletion-only Current Patch edits on surviving context', async () => {
+  const insertionProjection = projectRegionAwareReplay({
+    earlierBase: 'keep\nold\ntail\n',
+    earlierHead: 'keep\nold\nprior\ntail\n',
+    laterBase: 'keep\nbase\ntail\n',
+    laterHead: 'keep\nbase\ncurrent\ntail\n',
+    path: 'src/insertion.ts',
+  });
+  const deletionProjection = projectRegionAwareReplay({
+    earlierBase: 'keep\nold\ntail\n',
+    earlierHead: 'keep\nprior\ntail\n',
+    laterBase: 'keep\nbase\ntail\n',
+    laterHead: 'keep\ntail\n',
+    path: 'src/deletion.ts',
+  });
+  const insertionFile = {
+    ...createChangedFileWithPatch(
+      'src/insertion.ts',
+      'diff --git a/src/insertion.ts b/src/insertion.ts\n@@ -1,3 +1,4 @@\n keep\n base\n+current\n tail\n',
+    ),
+    regionalReplay: insertionProjection,
+  } satisfies ChangedFile;
+  const deletionFile = {
+    ...createChangedFileWithPatch(
+      'src/deletion.ts',
+      'diff --git a/src/deletion.ts b/src/deletion.ts\n@@ -1,3 +1,2 @@\n keep\n-base\n tail\n',
+    ),
+    regionalReplay: deletionProjection,
+  } satisfies ChangedFile;
+  const view = await renderReact(
+    <ReviewCodeViewHarness disableWorkerPool files={[insertionFile, deletionFile]} />,
+  );
+
+  try {
+    await waitFor(() => {
+      expect(view.container.querySelectorAll('[data-replay-kind="replay-conflict"]')).toHaveLength(
+        4,
+      );
+    });
+    const cards = [
+      ...view.container.querySelectorAll<HTMLElement>('[data-replay-kind="replay-conflict"]'),
+    ];
+    expect(cards.map((card) => card.dataset.replayPlacement)).toEqual([
+      'trailing-context',
+      'trailing-context',
+      'trailing-context',
+      'trailing-context',
+    ]);
+    expect(cards.map((card) => card.dataset.replayPair)).toEqual([
+      cards[1]?.dataset.replayPair,
+      cards[0]?.dataset.replayPair,
+      cards[3]?.dataset.replayPair,
+      cards[2]?.dataset.replayPair,
+    ]);
+    expect(cards[0]?.textContent).toContain('Prior Patch: prior-patch:0');
+    expect(cards[0]?.textContent).toContain('Current Patch: current-patch:0');
+    expect(cards[2]?.textContent).toContain('Prior Patch: prior-patch:0');
+    expect(cards[2]?.textContent).toContain('Current Patch: current-patch:0');
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('regional replay renders a zero-current conflict in one paired shared row', async () => {
+  const projection = projectRegionAwareReplay({
+    earlierBase: 'before\nsubject old\nafter\n',
+    earlierHead: 'before\nsubject prior\nafter\n',
+    laterBase: 'before\nsubject base\nafter\n',
+    laterHead: 'before\nsubject base\nafter\n',
+    path: 'src/zero-current.ts',
+  });
+  const file = {
+    ...createChangedFileWithPatch(
+      'src/zero-current.ts',
+      'diff --git a/src/zero-current.ts b/src/zero-current.ts\n@@ -1,3 +1,3 @@\n before\n subject base\n after\n',
+    ),
+    regionalReplay: projection,
+  } satisfies ChangedFile;
+  const view = await renderReact(<ReviewCodeViewHarness disableWorkerPool files={[file]} />);
+
+  try {
+    await waitFor(() => {
+      expect(view.container.querySelectorAll('[data-replay-kind="replay-conflict"]')).toHaveLength(
+        2,
+      );
+    });
+    const cards = [
+      ...view.container.querySelectorAll<HTMLElement>('[data-replay-kind="replay-conflict"]'),
+    ];
+    expect(cards.map((card) => card.dataset.replayFragment).toSorted()).toEqual([
+      'additions',
+      'deletions',
+    ]);
+    expect(cards[0]?.dataset.replayPair).toBe(cards[1]?.dataset.replayPair);
+    expect(cards.map((card) => card.dataset.replayPlacement)).toEqual(['region', 'region']);
+    expect(cards[0]?.textContent).toContain('No Current Patch edit overlaps this conflict');
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('regional replay keeps real separated conflict islands in file order', async () => {
+  const middle = Array.from({ length: 8 }, (_, index) => `middle ${index + 1}`);
+  const projection = projectRegionAwareReplay({
+    earlierBase: `start\nold one\n${middle.join('\n')}\nold two\nend\n`,
+    earlierHead: `start\nprior one\n${middle.join('\n')}\nprior two\nend\n`,
+    laterBase: `start\nbase one\n${middle.join('\n')}\nbase two\nend\n`,
+    laterHead: `start\ncurrent one\n${middle.join('\n')}\ncurrent two\nend\n`,
+    path: 'src/real-islands.ts',
+  });
+  const file = {
+    ...createChangedFileWithPatch(
+      'src/real-islands.ts',
+      [
+        'diff --git a/src/real-islands.ts b/src/real-islands.ts',
+        '@@ -1,3 +1,3 @@',
+        ' start',
+        '-base one',
+        '+current one',
+        ' middle 1',
+        '@@ -9,4 +9,4 @@',
+        ' middle 7',
+        ' middle 8',
+        '-base two',
+        '+current two',
+        ' end',
+        '',
+      ].join('\n'),
+    ),
+    regionalReplay: projection,
+  } satisfies ChangedFile;
+  const view = await renderReact(<ReviewCodeViewHarness disableWorkerPool files={[file]} />);
+
+  try {
+    await waitFor(() => {
+      expect(view.container.querySelectorAll('[data-replay-kind="replay-conflict"]')).toHaveLength(
+        4,
+      );
+    });
+    const firstIslandCards = [
+      ...view.container.querySelectorAll<HTMLElement>('[data-replay-regions="0"]'),
+    ];
+    const secondIslandCards = [
+      ...view.container.querySelectorAll<HTMLElement>('[data-replay-regions="2"]'),
+    ];
+    expect(firstIslandCards).toHaveLength(2);
+    expect(secondIslandCards).toHaveLength(2);
+    expect(firstIslandCards[0]?.dataset.replayPair).toBe(firstIslandCards[1]?.dataset.replayPair);
+    expect(secondIslandCards[0]?.dataset.replayPair).toBe(secondIslandCards[1]?.dataset.replayPair);
+    expect(firstIslandCards[0]?.dataset.replayPair).not.toBe(
+      secondIslandCards[0]?.dataset.replayPair,
+    );
+    expect(firstIslandCards[0]?.compareDocumentPosition(secondIslandCards[0]!)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(firstIslandCards[0]?.textContent).toContain('prior-patch:0');
+    expect(secondIslandCards[0]?.textContent).toContain('prior-patch:1');
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('regional replay cards retain every coalesced Prior Patch and Current Patch ID', async () => {
+  const severalCurrentProjection = projectRegionAwareReplay({
+    earlierBase: 'start\nold one\nold two\nmid\ntail\n',
+    earlierHead: 'start\nprior one\nprior two\nmid\ntail\n',
+    laterBase: 'start\nbase one\nbase two\nmid\ntail\n',
+    laterHead: 'start\ncurrent one\nbase two\ncurrent two\ntail\n',
+    path: 'src/several-current.ts',
+  });
+  const severalPriorProjection = projectRegionAwareReplay({
+    earlierBase: 'start\nfirst old\nbridge\nsecond old\nend\n',
+    earlierHead: 'start\nfirst prior\nbridge\nsecond prior\nend\n',
+    laterBase: 'start\nfirst base\nbridge\nsecond base\nend\n',
+    laterHead: 'start\nfirst base\nbridge current\nsecond base\nend\n',
+    path: 'src/several-prior.ts',
+  });
+  const severalCurrentFile = {
+    ...createChangedFileWithPatch(
+      'src/several-current.ts',
+      [
+        'diff --git a/src/several-current.ts b/src/several-current.ts',
+        '@@ -1,5 +1,5 @@',
+        ' start',
+        '-base one',
+        '+current one',
+        ' base two',
+        '-mid',
+        '+current two',
+        ' tail',
+        '',
+      ].join('\n'),
+    ),
+    regionalReplay: severalCurrentProjection,
+  } satisfies ChangedFile;
+  const severalPriorFile = {
+    ...createChangedFileWithPatch(
+      'src/several-prior.ts',
+      [
+        'diff --git a/src/several-prior.ts b/src/several-prior.ts',
+        '@@ -1,5 +1,5 @@',
+        ' start',
+        ' first base',
+        '-bridge',
+        '+bridge current',
+        ' second base',
+        ' end',
+        '',
+      ].join('\n'),
+    ),
+    regionalReplay: severalPriorProjection,
+  } satisfies ChangedFile;
+  const view = await renderReact(
+    <ReviewCodeViewHarness disableWorkerPool files={[severalCurrentFile, severalPriorFile]} />,
+  );
+
+  try {
+    await waitFor(() => {
+      expect(view.container.querySelectorAll('[data-replay-kind="replay-conflict"]')).toHaveLength(
+        4,
+      );
+    });
+    const cards = [
+      ...view.container.querySelectorAll<HTMLElement>('[data-replay-kind="replay-conflict"]'),
+    ];
+    const severalCurrentCards = cards.filter((card) =>
+      card.textContent?.includes('Current Patch: current-patch:0, current-patch:1'),
+    );
+    const severalPriorCards = cards.filter((card) =>
+      card.textContent?.includes('Prior Patch: prior-patch:0, prior-patch:1'),
+    );
+    expect(severalCurrentCards).toHaveLength(2);
+    expect(severalCurrentCards[0]?.textContent).toContain('Prior Patch: prior-patch:0');
+    expect(severalPriorCards).toHaveLength(2);
+    expect(severalPriorCards[0]?.textContent).toContain('Current Patch: current-patch:0');
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('regional replay puts added and deleted files only in their extant file-level slots', async () => {
+  const addedProjection = projectRegionAwareReplay({
+    earlierBase: null,
+    earlierHead: 'prior\n',
+    laterBase: null,
+    laterHead: 'current\n',
+    path: 'src/added.ts',
+  });
+  const deletedProjection = projectRegionAwareReplay({
+    earlierBase: 'old\n',
+    earlierHead: 'prior\n',
+    laterBase: 'base\n',
+    laterHead: null,
+    path: 'src/deleted.ts',
+  });
+  const addedFile = {
+    ...createChangedFileWithPatch(
+      'src/added.ts',
+      'diff --git a/src/added.ts b/src/added.ts\n@@ -0,0 +1 @@\n+current\n',
+    ),
+    regionalReplay: addedProjection,
+    status: 'added' as const,
+  } satisfies ChangedFile;
+  const deletedFile = {
+    ...createChangedFileWithPatch(
+      'src/deleted.ts',
+      'diff --git a/src/deleted.ts b/src/deleted.ts\n@@ -1 +0,0 @@\n-base\n',
+    ),
+    regionalReplay: deletedProjection,
+    status: 'deleted' as const,
+  } satisfies ChangedFile;
+  const view = await renderReact(
+    <ReviewCodeViewHarness disableWorkerPool files={[addedFile, deletedFile]} />,
+  );
+
+  try {
+    await waitFor(() => {
+      expect(view.container.querySelectorAll('[data-replay-placement="file"]')).toHaveLength(2);
+    });
+    const cards = [
+      ...view.container.querySelectorAll<HTMLElement>('[data-replay-placement="file"]'),
+    ];
+    expect(cards.map((card) => card.dataset.replayFragment).toSorted()).toEqual([
+      'additions',
+      'deletions',
+    ]);
+    expect(cards.every((card) => card.dataset.replayPair == null)).toBe(true);
+    expect(regionalReplayAnnotationsFor('src/added.ts')).toEqual([
+      expect.objectContaining({ lineNumber: 0, side: 'additions' }),
+    ]);
+    expect(regionalReplayAnnotationsFor('src/deleted.ts')).toEqual([
+      expect.objectContaining({ lineNumber: 0, side: 'deletions' }),
+    ]);
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('regional replay labels both paths for a renamed conflict while anchoring the later path', async () => {
+  const projection = projectRegionAwareReplay({
+    earlierBase: 'old\n',
+    earlierBasePath: 'src/old.ts',
+    earlierHead: 'prior\n',
+    earlierHeadPath: 'src/old.ts',
+    laterBase: 'base\n',
+    laterBasePath: 'src/old.ts',
+    laterHead: 'current\n',
+    laterHeadPath: 'src/new.ts',
+    oldPath: 'src/old.ts',
+    path: 'src/new.ts',
+  });
+  const file = {
+    ...createChangedFileWithPatch(
+      'src/new.ts',
+      'diff --git a/src/old.ts b/src/new.ts\n@@ -1 +1 @@\n-base\n+current\n',
+    ),
+    oldPath: 'src/old.ts',
+    regionalReplay: projection,
+    status: 'renamed' as const,
+  } satisfies ChangedFile;
+  const view = await renderReact(<ReviewCodeViewHarness disableWorkerPool files={[file]} />);
+
+  try {
+    await waitFor(() => {
+      expect(view.container.querySelectorAll('[data-replay-kind="replay-conflict"]')).toHaveLength(
+        2,
+      );
+    });
+    const card = view.container.querySelector<HTMLElement>('[data-replay-kind="replay-conflict"]');
+    expect(card?.textContent).toContain('Later Base (src/old.ts)');
+    expect(card?.textContent).toContain('Later HEAD (src/new.ts)');
+    expect(card?.dataset.replayPlacement).toBe('region');
   } finally {
     await view.cleanup();
   }

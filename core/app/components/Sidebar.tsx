@@ -9,9 +9,8 @@ import type {
 } from '../../lib/app-types.ts';
 import {
   formatLineCountNumber,
-  getDiffLineCount,
   getDiffLineCountTitle,
-  getTotalDiffLineCount,
+  getUnfilteredTotalDiffLineCount,
 } from '../../lib/diff.ts';
 import { isNativeInputTarget } from '../../lib/keyboard.ts';
 import { getShortRef, getSourceKey } from '../../lib/source.ts';
@@ -99,14 +98,7 @@ export function Sidebar({
   };
 }) {
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const lineCountsByPath = useMemo(
-    () => new Map(files.map((file) => [file.path, getDiffLineCount(file, showWhitespace)])),
-    [files, showWhitespace],
-  );
-  const totalLineCount = useMemo(
-    () => getTotalDiffLineCount(lineCountsByPath.values()),
-    [lineCountsByPath],
-  );
+  const totalLineCount = useMemo(() => getUnfilteredTotalDiffLineCount(files), [files]);
   const showTotalLineCount = mode !== 'history' && totalLineCount.countable;
   const showCommitButton =
     mode === 'tree' && currentSource.type === 'working-tree' && commitFiles.length > 0;

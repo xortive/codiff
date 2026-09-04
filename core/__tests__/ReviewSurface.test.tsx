@@ -9,8 +9,12 @@ import { ReviewTopBar } from '../app/components/ReviewTopBar.tsx';
 import { createDefaultConfig } from '../config/defaults.ts';
 import { ReviewSurface } from '../ReviewSurface.tsx';
 import type {
+  DiffComparisonView,
+  EvolutionUnitId,
   GitSha,
   NarrativeWalkthrough,
+  ReviewCommitEvolution,
+  ReviewVersionOption,
   SharedWalkthroughSnapshot,
   WalkthroughArtifactV5,
 } from '../types.ts';
@@ -56,6 +60,11 @@ const createMarkdownFile = (path = 'README.md') =>
       },
     ],
   }) satisfies SharedWalkthroughSnapshot['files'][number];
+
+const versionRevision = (sha: GitSha, text: string) => ({
+  label: { kind: 'version' as const, text },
+  sha,
+});
 
 const commenting = {
   canComment: false,
@@ -740,7 +749,7 @@ test('cached V5 walkthroughs explain unresolved authored code instead of omittin
   });
 });
 
-test('commit walkthroughs render commit boundaries and switch structure explicitly', async () => {
+test('commit walkthroughs expose cache-aware structure controls', async () => {
   const file = createChangedFile('src/commit.ts', { kind: 'commit' });
   const commitSha = '1'.repeat(40) as GitSha;
   const source = {
@@ -862,22 +871,179 @@ test('commit walkthroughs render commit boundaries and switch structure explicit
     await act(async () => {
       root.render(
         <ReviewSurface
-          capabilities={{ walkthrough: { onGenerate, status: 'ready' } }}
+          capabilities={{
+            walkthrough: {
+              error: { reason: 'Cached replacement failed.' },
+              onGenerate,
+              status: 'ready',
+            },
+          }}
           initialMode="walkthrough"
           snapshot={snapshot}
         />,
       );
     });
+    let structureSelect = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Walkthrough type"]',
+    );
+    expect(structureSelect?.value).toBe('commit-by-commit');
     expect(container.querySelector('.wt-unit-commit-ref')?.textContent).toContain(
       commitSha.slice(0, 8),
     );
-    const switchButton = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-      ({ textContent }) => textContent === 'Use net change',
+    expect(container.querySelector('.walkthrough-structure-error')?.textContent).toContain(
+      'Cached replacement failed.',
     );
-    expect(switchButton).not.toBeUndefined();
-    await act(async () => switchButton?.click());
+    const regenerateButton = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+      ({ textContent }) => textContent === 'Regenerate',
+    );
+    expect(regenerateButton?.disabled).toBe(false);
+    expect(
+      [...container.querySelectorAll<HTMLButtonElement>('button')].some(
+        ({ textContent }) => textContent === 'Load walkthrough',
+      ),
+    ).toBe(false);
+    await act(async () => regenerateButton?.click());
     await waitFor(() =>
-      expect(onGenerate).toHaveBeenCalledWith({ force: true, reviewStructure: 'net-change' }),
+      expect(onGenerate).toHaveBeenNthCalledWith(1, {
+        force: true,
+        reviewStructure: 'commit-by-commit',
+      }),
+    );
+    await act(async () => {
+      root.render(
+        <ReviewSurface
+          capabilities={{
+            walkthrough: {
+              error: { reason: 'Cached replacement failed.' },
+              onGenerate,
+              status: 'generating',
+            },
+          }}
+          initialMode="walkthrough"
+          snapshot={snapshot}
+        />,
+      );
+    });
+    structureSelect = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Walkthrough type"]',
+    );
+    expect(structureSelect?.disabled).toBe(false);
+    await act(async () => {
+      if (structureSelect) {
+        structureSelect.value = 'net-change';
+        structureSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+    expect(structureSelect?.value).toBe('net-change');
+    const loadWalkthroughButton = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+      ({ textContent }) => textContent === 'Load walkthrough',
+    );
+    expect(loadWalkthroughButton?.disabled).toBe(false);
+    await act(async () => loadWalkthroughButton?.click());
+    await waitFor(() =>
+      expect(onGenerate).toHaveBeenNthCalledWith(2, { reviewStructure: 'net-change' }),
+    );
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test('keeps PR structure selection active and waits for an explicit cache request', async () => {
+  const file = createChangedFile('src/pending.ts');
+  const source = {
+    baseSha: 'a'.repeat(40) as GitSha,
+    headSha: 'b'.repeat(40) as GitSha,
+    number: 42,
+    provider: 'github',
+    type: 'pull-request',
+    url: 'https://github.com/example/repo/pull/42',
+  } as const;
+  const snapshot = {
+    branch: 'feature',
+    codiffVersion: 'test',
+    exportedAt: '2026-08-18T00:00:00.000Z',
+    files: [file],
+    kind: 'codiff-walkthrough-share',
+    preferences: {
+      codeFontFamily: 'Fira Code',
+      codeFontSize: 13,
+      diffStyle: 'split',
+      showWhitespace: false,
+      theme: 'system',
+      wordWrap: false,
+    },
+    repository: { root: '/repo', source },
+    reviewScope: { kind: 'merge-request', structure: 'commit-by-commit' },
+    version: 1,
+    walkthrough: {
+      agent: 'codex',
+      chapters: [],
+      focus: 'Preparing the walkthrough.',
+      generatedAt: '2026-08-18T00:00:00.000Z',
+      kind: 'narrative',
+      repo: { branch: 'feature', root: '/repo' },
+      source: {
+        number: source.number,
+        provider: source.provider,
+        type: source.type,
+        url: source.url,
+      },
+      support: [],
+      title: 'Pending walkthrough',
+      version: 4,
+    },
+  } satisfies SharedWalkthroughSnapshot;
+  const onGenerate = vi.fn(async () => {});
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+
+  try {
+    await act(async () => {
+      root.render(
+        <ReviewSurface
+          capabilities={{
+            walkthrough: { generationReady: false, onGenerate, status: 'idle' },
+          }}
+          initialMode="walkthrough"
+          snapshot={snapshot}
+        />,
+      );
+    });
+    const structureSelect = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Walkthrough type"]',
+    );
+    const loadWalkthroughButton = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+      ({ textContent }) => textContent === 'Load walkthrough',
+    );
+    expect(structureSelect?.value).toBe('commit-by-commit');
+    expect(structureSelect?.disabled).toBe(false);
+    expect(loadWalkthroughButton?.disabled).toBe(true);
+    expect(container.textContent).toContain('Loading commit structure…');
+    expect(onGenerate).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('Choose a walkthrough type');
+
+    await act(async () => {
+      root.render(
+        <ReviewSurface
+          capabilities={{
+            walkthrough: { generationReady: true, onGenerate, status: 'idle' },
+          }}
+          initialMode="walkthrough"
+          snapshot={snapshot}
+        />,
+      );
+    });
+    expect(onGenerate).not.toHaveBeenCalled();
+    expect(container.querySelector('.walkthrough-progress-timer')).toBeNull();
+    const readyLoadWalkthroughButton = [
+      ...container.querySelectorAll<HTMLButtonElement>('button'),
+    ].find(({ textContent }) => textContent === 'Load walkthrough');
+    expect(readyLoadWalkthroughButton?.disabled).toBe(false);
+    await act(async () => readyLoadWalkthroughButton?.click());
+    await waitFor(() =>
+      expect(onGenerate).toHaveBeenCalledWith({ reviewStructure: 'commit-by-commit' }),
     );
   } finally {
     await act(async () => root.unmount());
@@ -972,4 +1138,225 @@ test('shared walkthroughs initially preview Markdown when other files are genera
   await waitFor(() => {
     expect(container.querySelector('.codiff-markdown-preview')).not.toBeNull();
   });
+});
+
+test('selects review versions and loads one Evolution Unit into the Tree', async () => {
+  const baseSha = '0'.repeat(40) as GitSha;
+  const beforeSha = '1'.repeat(40) as GitSha;
+  const afterSha = '2'.repeat(40) as GitSha;
+  const unitId = 'unit-revised' as EvolutionUnitId;
+  const source = {
+    headSha: afterSha,
+    number: 42,
+    projectPath: 'example/repo',
+    provider: 'gitlab',
+    type: 'pull-request',
+    url: 'https://gitlab.example.com/example/repo/-/merge_requests/42',
+  } as const;
+  const versions = [
+    {
+      createdAt: '2026-08-03T12:00:00.000Z',
+      number: 1,
+      range: { base: versionRevision(baseSha, 'Base'), head: versionRevision(beforeSha, 'v1') },
+      versionId: 'version-1' as ReviewVersionOption['versionId'],
+    },
+    {
+      createdAt: '2026-08-04T12:00:00.000Z',
+      isHead: true,
+      number: 2,
+      previousCreatedAt: '2026-08-03T12:00:00.000Z',
+      previousNumber: 1,
+      range: { base: versionRevision(baseSha, 'Base'), head: versionRevision(afterSha, 'v2') },
+      versionId: 'version-2' as ReviewVersionOption['versionId'],
+    },
+  ] satisfies ReadonlyArray<ReviewVersionOption>;
+  const beforeCommit = {
+    authoredAt: '2026-08-03T12:00:00.000Z',
+    authorName: 'Author',
+    parentShas: [baseSha],
+    sha: beforeSha,
+    shortSha: beforeSha.slice(0, 8),
+    subject: 'Add behavior',
+  };
+  const afterCommit = {
+    ...beforeCommit,
+    authoredAt: '2026-08-04T12:00:00.000Z',
+    parentShas: [beforeSha],
+    sha: afterSha,
+    shortSha: afterSha.slice(0, 8),
+    subject: 'Refine behavior',
+  };
+  const evolution = {
+    recommendation: {
+      rationale: 'The commit changed intentionally.',
+      suggestedStructure: 'commit-evolution',
+    },
+    summary: {
+      absorbedIntoBase: 0,
+      added: 0,
+      ambiguous: 0,
+      completeCoverage: true,
+      pairingCoverage: 1,
+      removed: 0,
+      retained: 0,
+      reviewable: 1,
+      revised: 1,
+      rewrittenSamePatch: 0,
+      unreviewableAmbiguous: 0,
+    },
+    units: [
+      {
+        after: afterCommit,
+        before: beforeCommit,
+        confidence: 'high',
+        kind: 'revised',
+        order: 0,
+        reviewable: true,
+        unitId,
+      },
+    ],
+  } satisfies ReviewCommitEvolution;
+  const aggregateFile = createChangedFile('src/aggregate.ts');
+  const unitFile = createChangedFile('src/unit.ts');
+  const versionCompare = {
+    analysis: {
+      summary: {
+        addedLines: 1,
+        baseMoved: false,
+        commentsAffected: 0,
+        conflictFiles: 0,
+        deletedLines: 1,
+        empty: false,
+        filesChanged: 1,
+        intentionalFiles: 1,
+        noiseFiles: 0,
+      },
+    },
+    comparison: { after: versions[1].range, before: versions[0].range },
+    files: [aggregateFile],
+    from: versions[0],
+    to: versions[1],
+  } satisfies DiffComparisonView;
+  const snapshot = {
+    branch: 'feature',
+    codiffVersion: 'test',
+    exportedAt: '2026-08-04T12:00:00.000Z',
+    files: [aggregateFile],
+    kind: 'codiff-walkthrough-share',
+    preferences: {
+      codeFontFamily: 'Fira Code',
+      codeFontSize: 13,
+      diffStyle: 'split',
+      showWhitespace: false,
+      theme: 'system',
+      wordWrap: false,
+    },
+    repository: { root: '/repo', source },
+    version: 1,
+    walkthrough: {
+      agent: 'codex',
+      chapters: [],
+      focus: 'Review the comparison.',
+      generatedAt: '2026-08-04T12:00:00.000Z',
+      kind: 'narrative',
+      repo: { branch: 'feature', root: '/repo' },
+      source,
+      support: [],
+      title: 'Version comparison',
+      version: 4,
+    },
+  } satisfies SharedWalkthroughSnapshot;
+  const onLoadVersionCommitDiff = vi.fn(async () => [unitFile]);
+  let resolveCommitRange!: (
+    files: ReadonlyArray<SharedWalkthroughSnapshot['files'][number]>,
+  ) => void;
+  const commitRangeFiles = new Promise<ReadonlyArray<SharedWalkthroughSnapshot['files'][number]>>(
+    (resolve) => {
+      resolveCommitRange = resolve;
+    },
+  );
+  const onLoadCommitRangeDiff = vi.fn(() => commitRangeFiles);
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const renderSurface = (versionComparisonEnabled: boolean) => (
+    <ReviewSurface
+      capabilities={{
+        desktop: {
+          commitScope: {
+            commits: [beforeCommit, afterCommit],
+            onLoadRangeDiff: onLoadCommitRangeDiff,
+          },
+          versionComparison: {
+            commitEvolution: evolution,
+            enabled: versionComparisonEnabled,
+            fromVersionId: versions[0].versionId,
+            onExit: () => {},
+            onLoadUnitDiff: onLoadVersionCommitDiff,
+            onOpen: () => {},
+            onRangeChange: () => {},
+            ...(versionComparisonEnabled ? { result: versionCompare } : {}),
+            toVersionId: versions[1].versionId,
+            versions,
+          },
+        },
+      }}
+      initialMode="tree"
+      snapshot={snapshot}
+    />
+  );
+
+  try {
+    sessionStorage.clear();
+    await act(async () => {
+      root.render(renderSurface(false));
+    });
+    const viewCommitRangeButton = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
+      ({ textContent }) => textContent === 'View commit range',
+    );
+    await act(async () => viewCommitRangeButton?.click());
+    const commitRows = container.querySelectorAll<HTMLButtonElement>('.commit-range-row');
+    await act(async () => commitRows[0]?.click());
+    await act(async () => {
+      commitRows[0]?.click();
+      await Promise.resolve();
+    });
+    expect(onLoadCommitRangeDiff).toHaveBeenCalledTimes(1);
+    expect(container.textContent).not.toContain('Loading selected commit changes…');
+    expect(container.textContent).toContain('src/aggregate.ts');
+    await act(async () => resolveCommitRange([unitFile]));
+    await waitFor(() => expect(container.textContent).toContain('src/unit.ts'));
+    await act(async () => root.render(renderSurface(true)));
+    expect(onLoadCommitRangeDiff).toHaveBeenCalledTimes(1);
+
+    expect(container.querySelector('.version-picker-pair')?.textContent).toContain('v1');
+    expect(container.querySelector('.version-picker-pair')?.textContent).toContain('v2');
+    const unitButton = [
+      ...container.querySelectorAll<HTMLButtonElement>('.version-commit-unit'),
+    ].find(({ textContent }) => textContent?.includes('Refine behavior'));
+    await act(async () => unitButton?.click());
+    await waitFor(() => expect(onLoadVersionCommitDiff).toHaveBeenCalledWith(unitId));
+    await waitFor(() => expect(container.textContent).toContain('src/unit.ts'));
+    const comparisonToggle = container.querySelector<HTMLButtonElement>(
+      '.version-comparison-toggle',
+    );
+    await act(async () => comparisonToggle?.click());
+    const walkthroughTab = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
+      ({ textContent }) => textContent === 'Walkthrough',
+    );
+    await act(async () => walkthroughTab?.click());
+    expect(container.querySelector('.version-comparison-section')).not.toBeNull();
+    expect(container.querySelector('.version-picker-pair')).toBeNull();
+    await act(async () => comparisonToggle?.click());
+    await waitFor(() => expect(container.querySelector('.version-picker-pair')).not.toBeNull());
+    await act(async () => root.render(renderSurface(false)));
+    expect(container.querySelector('.version-comparison-section')).not.toBeNull();
+    expect(container.querySelector('.version-tree-commit-scope')).toBeNull();
+    expect(container.querySelector('.comparison-range-pill')?.textContent).toBe(
+      'All commit changes',
+    );
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
 });

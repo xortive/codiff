@@ -306,7 +306,10 @@ if (resource.includes('/compare/')) {
   }));
 } else {
   process.stdout.write(JSON.stringify({
+    additions: 12,
     base: { ref: 'main', sha: '${baseSha}' },
+    changed_files: 2,
+    deletions: 4,
     head: { sha: '${headSha}' },
     title: 'Review Range Artifacts',
     user: { login: 'ada' },
@@ -326,6 +329,7 @@ if (resource.includes('/compare/')) {
     const state = await readPullRequestState(directory, source);
 
     expect(state.files).toHaveLength(2);
+    expect(state.diffStat).toEqual({ additions: 12, deletions: 4, filesChanged: 2 });
     expect(state.files[0]).toMatchObject({ path: 'src/app.ts', status: 'modified' });
     expect(state.files[0]?.sections[0]).toMatchObject({
       id: 'src/app.ts:pull-request:7',
@@ -356,8 +360,9 @@ if (resource.includes('/compare/')) {
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line) as Array<string>);
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(3);
     expect(calls.filter((args) => args.some((arg) => arg.includes('/compare/')))).toHaveLength(1);
+    expect(calls.filter((args) => args.every((arg) => !arg.includes('/compare/')))).toHaveLength(2);
     expect(calls.flat()).not.toContainEqual(expect.stringMatching(/\/pulls\/7\/files/));
     expect(calls.flat()).not.toContainEqual(
       expect.stringMatching(/comments|contents|graphql|application\/vnd\.github\.v3\.diff/),
@@ -458,9 +463,12 @@ if (resource.includes('/repository/compare?')) {
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line) as Array<string>);
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(3);
     const compare = calls.find((args) => args.some((arg) => arg.includes('/repository/compare')));
     expect(compare).toBeDefined();
+    expect(
+      calls.filter((args) => args.every((arg) => !arg.includes('/repository/compare'))),
+    ).toHaveLength(2);
     expect(compare?.join(' ')).toContain(`from=${baseSha}`);
     expect(compare?.join(' ')).not.toContain(startSha);
     expect(calls.flat()).not.toContainEqual(expect.stringMatching(/merge_requests\/7\/diffs/));

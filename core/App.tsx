@@ -160,12 +160,10 @@ export default function App() {
                 kind: 'single-diff',
                 source: state.source,
               })
-              .catch(
-                (error: unknown): NarrativeWalkthroughResult => ({
-                  reason: error instanceof Error ? error.message : String(error),
-                  status: 'unavailable',
-                }),
-              )
+              .catch((error: unknown): NarrativeWalkthroughResult => ({
+                reason: error instanceof Error ? error.message : String(error),
+                status: 'unavailable',
+              }))
               .then((result) => {
                 if (canceled) {
                   return;
