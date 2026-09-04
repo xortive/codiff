@@ -3607,6 +3607,66 @@ diffs-container .review-comment-thread {
   padding: 10px;
 }
 
+.review-comment-assessment {
+  background: color-mix(in srgb, var(--tree-selection-bg) 46%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-inline-start: 42px;
+  min-inline-size: 0;
+  padding: 9px 11px;
+}
+
+.review-comment-assessment-header {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  font: 12px/1.35 var(--font-sans);
+  gap: 6px;
+}
+
+.review-comment-assessment-label {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.review-comment-assessment-file {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-comment-assessment-state {
+  color: var(--muted);
+  margin-inline-start: auto;
+}
+
+.review-comment-assessment-state.error {
+  color: var(--danger);
+}
+
+.review-comment-assessment-content,
+.review-comment-assessment-error {
+  color: var(--text);
+  font: 13px/1.45 var(--font-sans);
+  overflow-wrap: anywhere;
+}
+
+.review-comment-assessment-content > :first-child {
+  margin-block-start: 0;
+}
+
+.review-comment-assessment-content > :last-child {
+  margin-block-end: 0;
+}
+
+.review-comment-assessment-error {
+  color: var(--danger);
+}
+
 .review-comment-thread-footer {
   align-items: center;
   display: flex;

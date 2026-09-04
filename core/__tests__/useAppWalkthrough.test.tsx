@@ -6,6 +6,7 @@ import { act } from 'react';
 import { expect, test, vi } from 'vite-plus/test';
 import { useAppWalkthrough } from '../app/hooks/useAppWalkthrough.ts';
 import { createDefaultConfig } from '../config/defaults.ts';
+import { walkthroughModelFromV4 } from '../lib/narrative-walkthrough-schema.ts';
 import type {
   GitSha,
   NarrativeWalkthrough,
@@ -74,7 +75,10 @@ const renderWalkthroughController = async ({
   codiff: Partial<Window['codiff']>;
   state?: RepositoryState;
 }) => {
-  window.codiff = codiff as Window['codiff'];
+  window.codiff = {
+    onNarrativeWalkthroughUpdated: vi.fn(() => () => {}),
+    ...codiff,
+  } as Window['codiff'];
   const stateRef = { current: state };
   const stateGenerationRef = { current: 0 };
   const preferencesRef = {
@@ -125,7 +129,7 @@ test('walkthrough controller lazily generates, refreshes, and transitions modes'
     getController().changeSidebarMode('walkthrough');
   });
   await waitFor(() => {
-    expect(getController().narrativeWalkthrough).toEqual(walkthrough);
+    expect(getController().narrativeWalkthrough).toEqual(walkthroughModelFromV4(walkthrough));
     expect(getController().walkthroughLoading).toBe(false);
   });
   expect(getNarrativeWalkthrough).toHaveBeenCalledWith(walkthrough.source, undefined);

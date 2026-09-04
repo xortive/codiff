@@ -11,7 +11,9 @@ import {
   updateReviewIdentityCollapsed,
   updateReviewIdentityViewed,
 } from '../lib/review-identity.ts';
+import { applyWalkthroughRegionHighlights } from '../lib/walkthrough-region-highlights.ts';
 import type {
+  AssessmentComponent,
   ChangedFile,
   DefinitionSearchResult,
   DiffSection,
@@ -29,6 +31,21 @@ import {
 } from './helpers/review-code-view.tsx';
 
 const gitSha = (value: string) => value as GitSha;
+const createAssessment = (
+  threadId: string,
+  outcome: AssessmentComponent['outcome'],
+): AssessmentComponent => ({
+  capturedPresentationState: { threadState: 'open' },
+  identity: { codeScope: { type: 'single-diff' }, threadId },
+  input: {
+    codeScope: { type: 'single-diff' },
+    thread: {
+      comments: [{ author: { login: 'reviewer' }, body: 'Question', id: threadId }],
+      id: threadId,
+    },
+  },
+  outcome,
+});
 
 const markdownEditorMock = vi.hoisted(() => ({
   flush: vi.fn<() => Promise<boolean>>(async () => true),
@@ -610,6 +627,131 @@ test('header-only walkthrough blocks render and can be scroll targets', async ()
       }),
     );
   });
+});
+
+test('walkthrough region navigation scrolls to the exact diff range', async () => {
+  const file = createChangedFile('src/range.ts');
+  const view = await renderReact(
+    <ReviewCodeViewHarness
+      blocks={[{ file, id: 'walkthrough:range' }]}
+      files={[]}
+      scrollTarget={{
+        blockId: 'walkthrough:range',
+        range: { end: 4, endSide: 'additions', side: 'additions', start: 2 },
+        request: -1,
+      }}
+    />,
+  );
+
+  try {
+    await waitFor(() => {
+      expect(codeViewMock.scrollTo).toHaveBeenCalledWith(
+        expect.objectContaining({
+          range: { end: 4, endSide: 'additions', side: 'additions', start: 2 },
+          type: 'range',
+        }),
+      );
+    });
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('renders ready, failed, and pending assessments beside matching threads', async () => {
+  const file = createChangedFileWithPatch(
+    'src/assessment.ts',
+    'diff --git a/src/assessment.ts b/src/assessment.ts\n@@ -1 +1 @@\n-old\n+new\n',
+  );
+  const comments = [
+    {
+      author: { login: 'reviewer' },
+      body: 'Does this still apply?',
+      destination: 'provider' as const,
+      filePath: file.path,
+      id: 'comment-ready',
+      isReadOnly: true,
+      kind: 'submitted-comment' as const,
+      lineNumber: 1,
+      resolvedSectionId: file.sections[0]!.id,
+      side: 'additions' as const,
+      threadId: 'thread-ready',
+    },
+    {
+      author: { login: 'reviewer' },
+      body: 'Check the failure path.',
+      destination: 'provider' as const,
+      filePath: file.path,
+      id: 'comment-failed',
+      isReadOnly: true,
+      kind: 'submitted-comment' as const,
+      lineNumber: 1,
+      resolvedSectionId: file.sections[0]!.id,
+      side: 'additions' as const,
+      threadId: 'thread-failed',
+    },
+    {
+      author: { login: 'reviewer' },
+      body: 'Check this while assessment runs.',
+      destination: 'provider' as const,
+      filePath: file.path,
+      id: 'comment-pending',
+      isReadOnly: true,
+      kind: 'submitted-comment' as const,
+      lineNumber: 1,
+      resolvedSectionId: file.sections[0]!.id,
+      side: 'additions' as const,
+      threadId: 'thread-pending',
+    },
+  ] satisfies ReadonlyArray<ReviewComment>;
+  const view = await renderReact(
+    <ReviewCodeViewHarness
+      assessmentComponents={
+        new Map([
+          [
+            'thread-ready',
+            createAssessment('thread-ready', {
+              generationMetadata: {
+                agent: 'codex',
+                generatedAt: '2026-01-01T00:00:00.000Z',
+                model: 'gpt-5',
+                profile: {
+                  agent: 'codex',
+                  authoringVersion: 'walkthrough-assessment-1',
+                  modelCandidates: ['gpt-5'],
+                  settings: {},
+                },
+              },
+              result: { disposition: 'still-applies', explanation: 'The branch is unchanged.' },
+              status: 'ready',
+            }),
+          ],
+          [
+            'thread-failed',
+            createAssessment('thread-failed', {
+              error: 'The model timed out.',
+              status: 'failed',
+            }),
+          ],
+        ])
+      }
+      comments={comments}
+      files={[file]}
+      liveReviewState={{
+        currentThreadStateById: new Map([['thread-ready', 'resolved']]),
+        pendingAssessmentThreadIds: new Set(['thread-pending']),
+      }}
+    />,
+  );
+
+  try {
+    expect(view.container.textContent).toContain('Still applies');
+    expect(view.container.textContent).toContain('The branch is unchanged.');
+    expect(view.container.textContent).toContain('Currently resolved');
+    expect(view.container.textContent).toContain('Failed to assess comment: The model timed out.');
+    expect(view.container.textContent).toContain('Assessing');
+  } finally {
+    await view.cleanup();
+  }
 });
 
 test('focused walkthrough blocks render only global comments visible in the focused patch', async () => {
@@ -2105,6 +2247,172 @@ test('code quality findings render as additions annotations', async () => {
       side: 'additions',
     },
   ]);
+});
+
+test('walkthrough regions render as grounded line annotations', async () => {
+  const file = createChangedFileWithPatch(
+    'src/app.ts',
+    'diff --git a/src/app.ts b/src/app.ts\n@@ -1,3 +1,3 @@\n-old one\n-old two\n-old three\n+new one\n+new two\n+new three\n',
+  );
+  const region = {
+    endLine: 3,
+    hunkId: 'src/app.ts:unstaged:h1',
+    id: 'new-call',
+    side: 'additions' as const,
+    startLine: 1,
+    title: 'New call',
+    tooltip: 'This invokes the `replacement` path.',
+  };
+  const blocks: ReadonlyArray<ReviewDiffBlock> = [
+    { file, id: 'walkthrough:stop:0', regions: [region] },
+  ];
+  const view = await renderReact(<ReviewCodeViewHarness blocks={blocks} files={[]} />);
+
+  try {
+    expect(view.container.querySelector('.walkthrough-region-annotation')?.textContent).toContain(
+      'New call',
+    );
+    expect(
+      view.container.querySelector('.walkthrough-region-annotation .walkthrough-inline-code')
+        ?.textContent,
+    ).toBe('replacement');
+    const item = codeViewMock.lastItems.find((candidate) =>
+      (
+        candidate as {
+          annotations?: ReadonlyArray<{ metadata: { type: string } }>;
+        }
+      ).annotations?.some((annotation) => annotation.metadata.type === 'walkthrough-region'),
+    ) as
+      | {
+          annotations?: ReadonlyArray<{
+            lineNumber: number;
+            metadata: { region?: typeof region; type: string };
+            side: string;
+          }>;
+        }
+      | undefined;
+    expect(
+      item?.annotations?.filter(({ metadata }) => metadata.type === 'walkthrough-region'),
+    ).toEqual([
+      {
+        lineNumber: 3,
+        metadata: { active: false, isPrimary: true, region, type: 'walkthrough-region' },
+        side: 'additions',
+      },
+    ]);
+    const diffItemIndex = codeViewMock.lastItems.findIndex(
+      (candidate) => candidate.type === 'diff',
+    );
+    const regionItemVersion = codeViewMock.lastItems[diffItemIndex]?.version;
+    const renderedRegionAnnotation = document.createElement('div');
+    renderedRegionAnnotation.className = 'walkthrough-region-annotation';
+    renderedRegionAnnotation.dataset.walkthroughRegionId = region.id;
+    codeViewMock.postRenderNodes[diffItemIndex]?.append(renderedRegionAnnotation);
+
+    await view.rerender(
+      <ReviewCodeViewHarness
+        blocks={[{ activeRegionId: region.id, file, id: 'walkthrough:stop:0', regions: [region] }]}
+        files={[]}
+      />,
+    );
+    expect(codeViewMock.lastItems[diffItemIndex]?.version).toBe(regionItemVersion);
+    expect(renderedRegionAnnotation.classList.contains('active')).toBe(true);
+
+    await view.rerender(<ReviewCodeViewHarness blocks={blocks} files={[]} showWhitespace />);
+    expect(renderedRegionAnnotation.classList.contains('active')).toBe(false);
+    expect(
+      (
+        codeViewMock.lastItems.find((candidate) => candidate.type === 'diff') as {
+          annotations?: ReadonlyArray<{ metadata: { type: string } }>;
+        }
+      ).annotations?.some(({ metadata }) => metadata.type === 'walkthrough-region'),
+    ).toBe(true);
+  } finally {
+    await view.cleanup();
+  }
+});
+
+test('each visible projection of a walkthrough region keeps its explanation', async () => {
+  const file = createChangedFileWithPatch(
+    'src/repeated.ts',
+    'diff --git a/src/repeated.ts b/src/repeated.ts\n@@ -1 +1 @@\n-old\n+new\n',
+  );
+  const region = {
+    endLine: 1,
+    hunkId: 'src/repeated.ts:unstaged:h1',
+    id: 'shared-region',
+    side: 'additions' as const,
+    startLine: 1,
+    title: 'Shared explanation',
+    tooltip: 'This explanation must follow every visible projection.',
+  };
+  await using view = await renderReact(
+    <ReviewCodeViewHarness
+      blocks={[
+        { file, id: 'walkthrough:stop:0', regions: [region] },
+        { file, id: 'walkthrough:stop:1', regions: [region] },
+      ]}
+      files={[]}
+    />,
+  );
+
+  const annotations = codeViewMock.lastItems.flatMap((item) =>
+    'annotations' in item && Array.isArray(item.annotations)
+      ? item.annotations.filter((annotation) => annotation.metadata.type === 'walkthrough-region')
+      : [],
+  );
+  expect(annotations).toHaveLength(2);
+  expect(annotations.map((annotation) => annotation.metadata.isPrimary)).toEqual([true, false]);
+  expect(view.container.querySelectorAll('.walkthrough-region-annotation')).toHaveLength(2);
+  expect(view.container.querySelectorAll('#shared-region')).toHaveLength(1);
+});
+
+test('walkthrough regions highlight their complete side-specific ranges', () => {
+  const root = document.createElement('div');
+  for (const sideName of ['additions', 'deletions'] as const) {
+    const side = document.createElement('div');
+    side.dataset[sideName] = '';
+    for (let lineNumber = 1; lineNumber <= 4; lineNumber += 1) {
+      const line = document.createElement('div');
+      line.dataset.line = String(lineNumber);
+      const number = document.createElement('div');
+      number.dataset.columnNumber = String(lineNumber);
+      side.append(line, number);
+    }
+    root.append(side);
+  }
+  const regions = [
+    {
+      endLine: 3,
+      hunkId: 'additions-hunk',
+      id: 'unit-1:additions',
+      side: 'additions' as const,
+      startLine: 2,
+      title: 'Added range',
+      tooltip: 'Added range details.',
+    },
+    {
+      endLine: 2,
+      hunkId: 'deletions-hunk',
+      id: 'unit-1:deletions',
+      side: 'deletions' as const,
+      startLine: 1,
+      title: 'Deleted range',
+      tooltip: 'Deleted range details.',
+    },
+  ];
+
+  applyWalkthroughRegionHighlights(root, regions, 'unit-1:deletions');
+
+  expect(root.querySelectorAll('[data-additions] [data-walkthrough-region]')).toHaveLength(4);
+  expect(root.querySelectorAll('[data-deletions] [data-walkthrough-region]')).toHaveLength(4);
+  expect(root.querySelectorAll('[data-walkthrough-region-active]')).toHaveLength(4);
+  expect(
+    root.querySelector('[data-additions] [data-line="1"][data-walkthrough-region]'),
+  ).toBeNull();
+  expect(
+    root.querySelector('[data-deletions] [data-line="3"][data-walkthrough-region]'),
+  ).toBeNull();
 });
 
 test('Enter on a focused review control is not converted into a hunk comment', async () => {

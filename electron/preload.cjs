@@ -137,6 +137,12 @@ const codiff = {
     return () => ipcRenderer.removeListener('codiff:updateStatusChanged', listener);
   },
   findDefinitions: (request) => ipcRenderer.invoke('codiff:findDefinitions', request),
+  onNarrativeWalkthroughUpdated: (callback) => {
+    /** @param {Electron.IpcRendererEvent} _event @param {import('../core/types.ts').NarrativeWalkthroughUpdate} update */
+    const listener = (_event, update) => callback(update);
+    ipcRenderer.on('codiff:narrativeWalkthroughUpdated', listener);
+    return () => ipcRenderer.removeListener('codiff:narrativeWalkthroughUpdated', listener);
+  },
   openConfigFile: () => ipcRenderer.invoke('codiff:openConfigFile'),
   openReleasePage: () => ipcRenderer.invoke('codiff:openReleasePage'),
   openFile: (path, lineNumber) => ipcRenderer.invoke('codiff:openFile', path, lineNumber),

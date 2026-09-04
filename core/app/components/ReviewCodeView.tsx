@@ -60,6 +60,7 @@ import type {
   ReviewScrollBehavior,
   ReviewScrollTarget,
   WalkthroughNote,
+  WalkthroughRegionAnnotationMetadata,
 } from '../../lib/app-types.ts';
 import {
   codeViewItemMetrics,
@@ -91,7 +92,7 @@ import {
 } from '../../lib/identifier-navigation.ts';
 import { getItemVersion } from '../../lib/item-version.ts';
 import { isNativeInputTarget, isPrimaryModifier } from '../../lib/keyboard.ts';
-import { sanitizeMarkdownImages } from '../../lib/markdown.tsx';
+import { renderInlineMarkdown, sanitizeMarkdownImages } from '../../lib/markdown.tsx';
 import { isGeneratedWalkthroughFile } from '../../lib/narrative-walkthrough-diff.js';
 import {
   getCommentKey,
@@ -122,6 +123,11 @@ import {
   type SourceDescriptionAuthor,
 } from '../../lib/source-description.ts';
 import { getSourceKey } from '../../lib/source.ts';
+import {
+  getThreadAssessmentDisplay,
+  type ThreadAssessmentComponent,
+} from '../../lib/walkthrough-assessment-display.ts';
+import { applyWalkthroughRegionHighlights } from '../../lib/walkthrough-region-highlights.ts';
 import type {
   ChangedFile,
   CodiffPreferences,
@@ -133,10 +139,12 @@ import type {
   DiffImageContentResult,
   DiffSection,
   GitIdentity,
+  LiveReviewState,
   PullRequestCodeQualityFinding,
   PullRequestExistingReviewComment,
   ResolvedReviewSource,
   ReviewSource,
+  WalkthroughRegion,
 } from '../../types.ts';
 import { Avatar } from './Avatar.tsx';
 import { Button } from './Button.tsx';
@@ -1933,6 +1941,14 @@ const groupReviewCommentsByThread = (comments: ReadonlyArray<ReviewComment>) => 
 
 const noopResolveThread = () => {};
 
+const assessmentDispositionLabel = {
+  addressed: 'Addressed',
+  'no-longer-applicable': 'No longer applicable',
+  'partially-addressed': 'Partially addressed',
+  'still-applies': 'Still applies',
+  unclear: 'Unclear',
+} as const;
+
 // The CodeView header host is measured by a ResizeObserver, so no manual
 // layout pass is needed when the description body settles.
 const noopLayoutReady = () => {};
@@ -1940,12 +1956,14 @@ const noopLayoutReady = () => {};
 function ReviewCommentThreadGroup({
   agentId,
   agentLabel,
+  assessmentComponent,
   comments,
   focusCommentId,
   focusCommentRequest,
   focusEditorRef,
   identity,
   keymap,
+  liveReviewState,
   onAskCodex,
   onCommentBlur,
   onCommentDraftChange,
@@ -1960,12 +1978,14 @@ function ReviewCommentThreadGroup({
 }: {
   agentId: 'codex' | 'claude' | 'opencode' | 'pi';
   agentLabel: string;
+  assessmentComponent?: ThreadAssessmentComponent;
   comments: ReadonlyArray<ReviewComment>;
   focusCommentId: string | null;
   focusCommentRequest: number;
   focusEditorRef: (node: MarkdownEditorHandle | null) => void;
   identity: GitIdentity | null;
   keymap: CodiffKeymap;
+  liveReviewState?: LiveReviewState;
   onAskCodex?: (comment: ReviewComment) => void;
   onCommentBlur: (comment: ReviewComment, body: string, flushDraft: () => void) => void;
   onCommentDraftChange?: (comment: Pick<ReviewComment, 'body' | 'id'> | null) => void;
@@ -2009,6 +2029,9 @@ function ReviewCommentThreadGroup({
     !resolving;
   const hasThreadActions = canReplyToThread || canResolveThread;
   const resolveError = resolveState.threadId === threadId ? resolveState.error : null;
+  const assessmentDisplay = getThreadAssessmentDisplay(assessmentComponent, liveReviewState);
+  const assessmentPending =
+    threadId != null && liveReviewState?.pendingAssessmentThreadIds?.has(threadId) === true;
 
   const handleReply = useCallback(() => {
     if (!threadId || !lastComment) {
@@ -2066,6 +2089,39 @@ function ReviewCommentThreadGroup({
           />
         );
       })}
+      {assessmentDisplay || assessmentPending ? (
+        <div
+          className={`review-comment-assessment${assessmentPending ? ' pending' : ''}`}
+          role="status"
+        >
+          <div className="review-comment-assessment-header">
+            <strong>{assessmentPending ? 'Assessing' : 'Assessment'}</strong>
+            {assessmentDisplay?.component.outcome.status === 'ready' ? (
+              <span className="review-comment-assessment-disposition">
+                {assessmentDispositionLabel[assessmentDisplay.component.outcome.result.disposition]}
+              </span>
+            ) : null}
+            {assessmentDisplay?.currentStateLabel ? (
+              <span className="review-comment-assessment-current-state">
+                {assessmentDisplay.currentStateLabel}
+              </span>
+            ) : null}
+          </div>
+          {assessmentDisplay?.component.outcome.status === 'ready' ? (
+            <ReadOnlyMarkdownView
+              ariaLabel="Review comment assessment"
+              className="review-comment-assessment-markdown"
+              contentClassName="review-comment-assessment-content"
+              value={assessmentDisplay.component.outcome.result.explanation}
+              variant="embedded"
+            />
+          ) : assessmentDisplay?.component.outcome.status === 'failed' ? (
+            <div className="review-comment-assessment-error">
+              Failed to assess comment: {assessmentDisplay.component.outcome.error}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {hasThreadActions ? (
         <div className="review-comment-thread-footer">
           {resolveError ? (
@@ -2216,11 +2272,13 @@ function ReviewAnnotation({
   agentId,
   agentLabel,
   annotation,
+  assessmentComponents,
   comments,
   focusCommentId,
   focusCommentRequest,
   identity,
   keymap,
+  liveReviewState,
   onAskCodex,
   onCommentBlur,
   onCommentDraftChange,
@@ -2237,11 +2295,13 @@ function ReviewAnnotation({
   agentId: 'codex' | 'claude' | 'opencode' | 'pi';
   agentLabel: string;
   annotation: DiffLineAnnotation<ReviewCommentAnnotationMetadata>;
+  assessmentComponents?: ReadonlyMap<string, ThreadAssessmentComponent>;
   comments: ReadonlyArray<ReviewComment>;
   focusCommentId: string | null;
   focusCommentRequest: number;
   identity: GitIdentity | null;
   keymap: CodiffKeymap;
+  liveReviewState?: LiveReviewState;
   onAskCodex?: (comment: ReviewComment) => void;
   onCommentBlur: (comment: ReviewComment, body: string, flushDraft: () => void) => void;
   onCommentDraftChange?: (comment: Pick<ReviewComment, 'body' | 'id'> | null) => void;
@@ -2308,6 +2368,9 @@ function ReviewAnnotation({
         <ReviewCommentThreadGroup
           agentId={agentId}
           agentLabel={agentLabel}
+          assessmentComponent={assessmentComponents?.get(
+            group.comments[0]?.threadId ?? group.comments[0]?.id ?? '',
+          )}
           comments={group.comments}
           focusCommentId={focusCommentId}
           focusCommentRequest={focusCommentRequest}
@@ -2315,6 +2378,7 @@ function ReviewAnnotation({
           identity={identity}
           key={group.key}
           keymap={keymap}
+          liveReviewState={liveReviewState}
           onAskCodex={onAskCodex}
           onCommentBlur={onCommentBlur}
           onCommentDraftChange={onCommentDraftChange}
@@ -2371,6 +2435,24 @@ function CodeQualityAnnotation({
   );
 }
 
+function WalkthroughRegionAnnotation({
+  annotation,
+}: {
+  annotation: DiffLineAnnotation<WalkthroughRegionAnnotationMetadata>;
+}) {
+  const { isPrimary, region } = annotation.metadata;
+  return (
+    <div
+      className="walkthrough-region-annotation"
+      data-walkthrough-region-id={region.id}
+      id={isPrimary ? region.id : undefined}
+    >
+      <strong>{region.title}</strong>
+      <span>{renderInlineMarkdown(region.tooltip)}</span>
+    </div>
+  );
+}
+
 const scrollTargetRetryFrameLimit = 90;
 
 const getEffectiveScrollBehavior = (behavior: ReviewScrollBehavior) =>
@@ -2397,6 +2479,7 @@ type NavAnchor = {
 };
 
 type FileReviewDiffBlock = {
+  activeRegionId?: string;
   comments?: ReadonlyArray<ReviewComment>;
   file: ChangedFile;
   fileSelected?: boolean;
@@ -2405,6 +2488,7 @@ type FileReviewDiffBlock = {
   id: string;
   itemIdPrefix?: string;
   note?: string;
+  regions?: ReadonlyArray<WalkthroughRegion>;
   reviewIdentity?: ReviewIdentity;
   selected?: boolean;
 };
@@ -2473,6 +2557,15 @@ const lineIsVisibleInFileDiff = (
     const hunkLineCount = side === 'deletions' ? hunk.deletionCount : hunk.additionCount;
     return lineNumber >= hunkStart && lineNumber < hunkStart + hunkLineCount;
   });
+
+const lastVisibleRegionLine = (fileDiff: FileDiffMetadata, region: WalkthroughRegion) => {
+  for (let line = region.endLine; line >= region.startLine; line -= 1) {
+    if (lineIsVisibleInFileDiff(fileDiff, region.side, line)) {
+      return line;
+    }
+  }
+  return null;
+};
 
 const reviewCommentAnchorIsVisibleInFileDiff = (
   comment: ReviewComment,
@@ -2707,6 +2800,7 @@ export function ReviewCodeView({
   agentId,
   agentLabel,
   allowViewedToggle = false,
+  assessmentComponents,
   blocks,
   bottomInset = codeViewLayout.paddingBottom,
   codeQualityFindings = [],
@@ -2727,6 +2821,7 @@ export function ReviewCodeView({
   isReadOnly = false,
   itemVersionByKey,
   keymap,
+  liveReviewState,
   loadingSectionIds,
   onActiveBlockChange,
   onAskCodex,
@@ -2773,6 +2868,7 @@ export function ReviewCodeView({
   agentId: 'codex' | 'claude' | 'opencode' | 'pi';
   agentLabel: string;
   allowViewedToggle?: boolean;
+  assessmentComponents?: ReadonlyMap<string, ThreadAssessmentComponent>;
   blocks?: ReadonlyArray<ReviewDiffBlock>;
   bottomInset?: number;
   codeQualityFindings?: ReadonlyArray<PullRequestCodeQualityFinding>;
@@ -2793,6 +2889,7 @@ export function ReviewCodeView({
   isReadOnly?: boolean;
   itemVersionByKey: Readonly<Record<string, number>>;
   keymap: CodiffKeymap;
+  liveReviewState?: LiveReviewState;
   loadingSectionIds: ReadonlySet<string>;
   onActiveBlockChange?: (blockId: string) => void;
   onAskCodex?: (comment: ReviewComment) => void;
@@ -3021,6 +3118,7 @@ export function ReviewCodeView({
     const nextItemMetadata = new Map<string, CodeViewItemMetadata>();
     const nextSearchTargetsByBaseItemId = new Map<string, Array<RenderedSearchTarget>>();
     const nextSelectedHeaderItemIds = new Set<string>();
+    const annotatedRegionIds = new Set<string>();
     const fontLayoutKey = `line-height:${diffLineHeight}`;
 
     for (const block of reviewBlocks) {
@@ -3171,8 +3269,32 @@ export function ReviewCodeView({
                 side: 'additions',
               }) satisfies DiffLineAnnotation<ReviewAnnotationMetadata>,
           );
+        const visibleRegions = (block.regions ?? []).filter(
+          (region) => lastVisibleRegionLine(fileDiff, region) != null,
+        );
+        const regionAnnotations = visibleRegions.flatMap((region) => {
+          const lineNumber = lastVisibleRegionLine(fileDiff, region);
+          if (lineNumber == null) {
+            return [];
+          }
+          const isPrimary = !annotatedRegionIds.has(region.id);
+          annotatedRegionIds.add(region.id);
+          return [
+            {
+              lineNumber,
+              metadata: {
+                active: region.id === block.activeRegionId,
+                isPrimary,
+                region,
+                type: 'walkthrough-region',
+              },
+              side: region.side,
+            } satisfies DiffLineAnnotation<ReviewAnnotationMetadata>,
+          ];
+        });
 
         nextItemMetadata.set(id, {
+          ...(block.activeRegionId ? { activeWalkthroughRegionId: block.activeRegionId } : {}),
           blockId: block.id,
           canEditMarkdown,
           canRenderMarkdown,
@@ -3187,6 +3309,7 @@ export function ReviewCodeView({
           section,
           sectionCount: file.sections.length,
           walkthroughNote,
+          ...(visibleRegions.length > 0 ? { walkthroughRegions: visibleRegions } : {}),
         });
         nextFirstItemByBlockId.set(block.id, nextFirstItemByBlockId.get(block.id) ?? id);
         nextFirstItemByPath.set(file.path, nextFirstItemByPath.get(file.path) ?? id);
@@ -3259,7 +3382,7 @@ export function ReviewCodeView({
           continue;
         }
         nextItems.push({
-          annotations: [...annotationMap.values(), ...codeQualityAnnotations],
+          annotations: [...annotationMap.values(), ...codeQualityAnnotations, ...regionAnnotations],
           collapsed: isCollapsed,
           fileDiff,
           id,
@@ -3273,6 +3396,8 @@ export function ReviewCodeView({
                   ? `${metadata.finding.fingerprint}:${metadata.finding.status}`
                   : '',
               )
+              .join(',')}:${visibleRegions
+              .map((region) => `${region.id}:${region.side}:${region.startLine}-${region.endLine}`)
               .join(',')}`,
           ),
         });
@@ -3866,6 +3991,22 @@ export function ReviewCodeView({
         },
         onPostRender: (node, instance, phase, context) => {
           const metadata = itemMetadata.get(context.item.id);
+          const regionRoot = node.shadowRoot;
+          if (regionRoot) {
+            applyWalkthroughRegionHighlights(
+              regionRoot,
+              metadata?.walkthroughRegions ?? [],
+              metadata?.activeWalkthroughRegionId,
+            );
+          }
+          for (const annotation of node.querySelectorAll<HTMLElement>(
+            '[data-walkthrough-region-id]',
+          )) {
+            annotation.classList.toggle(
+              'active',
+              annotation.dataset.walkthroughRegionId === metadata?.activeWalkthroughRegionId,
+            );
+          }
           const isWalkthroughHeaderItem = context.item.id.endsWith(':walkthrough-header');
           node.classList.toggle('codiff-walkthrough-header-item', isWalkthroughHeaderItem);
           node.classList.toggle(
@@ -4154,6 +4295,21 @@ export function ReviewCodeView({
 
     const tryScroll = () => {
       if (canceled || handledScrollRequestRef.current === scrollTarget.request) {
+        return;
+      }
+
+      const handle = codeViewRef.current;
+      const viewer = handle?.getInstance();
+      if (scrollTarget.range && handle && viewer?.getTopForItem(itemId) != null) {
+        handle.scrollTo({
+          align: 'center',
+          behavior: getEffectiveScrollBehavior(behavior),
+          id: itemId,
+          offset: DEFAULT_PADDING,
+          range: scrollTarget.range,
+          type: 'range',
+        });
+        handledScrollRequestRef.current = scrollTarget.request;
         return;
       }
 
@@ -4720,16 +4876,26 @@ export function ReviewCodeView({
         );
       }
 
+      if (annotation.metadata.type === 'walkthrough-region') {
+        return (
+          <WalkthroughRegionAnnotation
+            annotation={annotation as DiffLineAnnotation<WalkthroughRegionAnnotationMetadata>}
+          />
+        );
+      }
+
       return (
         <ReviewAnnotation
           agentId={agentId}
           agentLabel={agentLabel}
           annotation={annotation as DiffLineAnnotation<ReviewCommentAnnotationMetadata>}
+          assessmentComponents={assessmentComponents}
           comments={renderComments}
           focusCommentId={focusCommentId}
           focusCommentRequest={focusCommentRequest}
           identity={gitIdentity}
           keymap={keymap}
+          liveReviewState={liveReviewState}
           onAskCodex={onAskCodex}
           onCommentBlur={blurComment}
           onCommentDraftChange={onCommentDraftChange}
@@ -4748,6 +4914,7 @@ export function ReviewCodeView({
     [
       agentId,
       agentLabel,
+      assessmentComponents,
       blurComment,
       deleteComment,
       focusCommentId,
@@ -4756,6 +4923,7 @@ export function ReviewCodeView({
       gitIdentity,
       itemMetadata,
       keymap,
+      liveReviewState,
       markMarkdownPreviewLayoutReady,
       markImagePreviewLayoutReady,
       markCommentLayoutChanged,

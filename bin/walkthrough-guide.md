@@ -6,7 +6,9 @@ diff. The diff content itself is not embedded. Codiff computes the diff from the
 resolves hunk ids on load, and renders the real current diff.
 
 Write the JSON document to a **temporary file outside the repository** and pass it to
-Codiff with `--walkthrough-file`.
+Codiff with `--walkthrough-file`. This file is an authoring draft, not Codiff's persisted
+walkthrough format. Codiff validates and anchors the draft, then stores it inside a composite V5
+artifact with sanitized diff context, the resolved generation request, and generation metadata.
 
 Default to the **staged** diff (`git diff --staged`). If the user named a target, use that:
 a commit, branch, pull request, ref range, or repository path. If nothing is staged, fall back
@@ -15,8 +17,9 @@ choose.
 
 ## Shape
 
-- **`version` / `kind` / `title` / `focus`** — use `version: 4`, `kind: "narrative"`,
-  a short walkthrough title, and a one- or two-sentence string describing the review focus.
+- **`kind` / `title` / `focus`** — use `kind: "narrative"`, a short walkthrough title, and a
+  one- or two-sentence string describing the review focus. Codiff supplies persisted document
+  metadata when it stores the normalized draft as a V5 artifact.
 - **`chapters[]`** — 1-6 compact sections in display order. A chapter is a conceptual group,
   not a file. Every chapter requires a unique string `id`, plus `title`, `icon`, `blurb`, and
   `stops`. For one- or two-file diffs, prefer one chapter unless there are clearly separate review
@@ -46,6 +49,14 @@ choose.
   recognizes `linguist-generated` and `gitlab-generated` attributes from `.gitattributes`.
 - **`changeType?` / `commitNote?`** — optional commit composer metadata for committable
   walkthroughs.
+- **`regions`** — return this array for every stop. Include one or two precise ranges when the stop
+  makes a substantive claim about specific lines. Use an empty array only when every supplied hunk
+  is synthetic or the explanation is inherently structural, cross-file, or whole-file. Each range
+  belongs to one supplied hunk and one diff side, contains a concise title and tooltip, and must be
+  referenced from the stop prose as `[descriptive phrase](#region-id)`. Region IDs are local to one
+  generated walkthrough. Codiff renders the complete range as one contiguous, comment-like note
+  even when the diff presentation is segmented. Regions are walkthrough-only visual callouts and
+  never create provider comments or local submission drafts.
 - **`commit?`** — for working-tree walkthroughs, include `title` and `body` when there is enough
   signal for a useful commit message. Omit it for commits, branches, and pull requests.
 
@@ -53,6 +64,9 @@ choose.
 
 - Do not provide `added`, `deleted`, `path`, `oldPath`, `status`, `anchor`, `repo`, `source`,
   `generatedAt`, `agent`, or `meta`. Codiff computes those from the live diff.
+- Do not provide review threads or assessments. Narrative authoring is thread-free; when supported,
+  Codiff schedules each applicable provider-thread assessment independently against its exact code
+  scope and stores those components beside the narrative.
 - Every changed hunk should appear at most once in either a stop or support. Codiff adds omitted
   live-diff hunks to support, but a clean document reads better.
 - Order stops by review leverage, not by file path.
@@ -63,9 +77,12 @@ choose.
 - Do not make one stop per file for broad changes. Group hunks that implement the same idea in
   one stop.
 - Never split a generated-like file across stops or support items. Use its single synthetic hunk id.
-- Keep `summary` to one concrete sentence. Keep `prose` short and specific. Do not use markdown
-  headings, lists, or other block structure. Inline code is supported, though: wrap symbol names,
-  file paths, flags, and other literals in backticks, e.g. `--walkthrough-file` or `renderInlineMarkdown`.
+- Keep `summary` to one concrete sentence. Keep `prose` focused and proportionate to the
+  implementation: simple stops may use one paragraph, while complex stops should use two to four
+  short paragraphs explaining behavior, mechanism, dependencies, downstream effects, and reviewer
+  considerations. Do not narrate syntax line by line or use Markdown headings, lists, or other
+  block structure. Inline code is supported: wrap symbol names, file paths, flags, and other
+  literals in backticks, e.g. `--walkthrough-file` or `renderInlineMarkdown`.
 - Avoid generic filler, broad assurance language, and meta-explanatory labels.
 - Do not invent bugs, risks, tests, or validation. Describe what the diff and conversation
   actually support.

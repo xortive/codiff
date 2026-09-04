@@ -1,4 +1,15 @@
 export { defaultReviewPreferences } from './defaults.ts';
+export { hasCapturedContextCapability, hasGenerationRequestCapability } from './types.ts';
+export {
+  narrativeWalkthroughV4Schema,
+  parseNarrativeWalkthroughV4,
+  parseWalkthroughArtifactV5,
+  parseWalkthroughModel,
+  resolveWalkthroughFiles,
+  safeParseNarrativeWalkthroughV4,
+  walkthroughArtifactV5Schema,
+  walkthroughModelFromV4,
+} from './lib/narrative-walkthrough-schema.ts';
 export {
   diffRangesMatch,
   resolveProviderCommentTarget,
@@ -56,12 +67,60 @@ export {
   type WalkthroughGenerationTask,
 } from './lib/walkthrough-generation-tasks.ts';
 export {
+  eligibleWalkthroughAssessmentCandidates,
+  selectWalkthroughAssessmentCandidates,
+  type AssessmentChangedRange,
+  type AssessmentRoutingAnchor,
+  type AssessmentRoutingContext,
+  type AssessmentSelection,
+  type AssessmentThreadCandidate,
+} from './lib/walkthrough-assessment-relevance.ts';
+export {
+  assessmentValuesEqual,
+  reconcileWalkthroughAssessments,
+  type AssessmentDemand,
+  type AssessmentReconciliation,
+} from './lib/walkthrough-assessment-cache.ts';
+export {
+  buildWalkthroughAssessmentPrompt,
+  createAssessmentDemand,
+  createAssessmentDemandsFromSelections,
+  createAssessmentGenerationProfile,
+  generateAssessmentCollection,
+  generateAssessmentComponent,
+  normalizeAssessmentInput,
+  normalizeThreadAssessmentResult,
+  sanitizeAssessmentError,
+  walkthroughAssessmentAuthoringVersion,
+  type AssessmentModelResult,
+  type RunAssessmentModel,
+} from './lib/walkthrough-assessments.ts';
+export {
+  assessmentComponentByThreadId,
+  buildAssessmentDestinationIndex,
+  currentThreadStateById,
+  findPendingAssessmentDestination,
+  getThreadAssessmentDisplay,
+  type AssessmentDestination,
+  type ThreadAssessmentComponent,
+  type ThreadAssessmentDisplay,
+} from './lib/walkthrough-assessment-display.ts';
+export {
   parsePlanShareManifest,
   parsePlanShareUpload,
   type PlanShareManifestV1,
   type ShareUploader,
 } from './share.ts';
 export type {
+  AssessmentCapturedPresentationState,
+  AssessmentCodeScope,
+  AssessmentCollection,
+  AssessmentComponent,
+  AssessmentIdentity,
+  AssessmentInput,
+  AssessmentOutcome,
+  AssessmentThreadAnchor,
+  AssessmentThreadComment,
   ChangedFile,
   CodiffFeatureFlags,
   CodiffPreferences,
@@ -72,7 +131,11 @@ export type {
   GenerationSettings,
   GitIdentity,
   GitSha,
+  LiveReviewState,
   NarrativeWalkthrough,
+  NarrativeWalkthroughUpdate,
+  NarrativeWalkthroughV4,
+  PersistedWalkthrough,
   PlanCommentThread,
   PullRequestCodeQualityFinding,
   PullRequestGeneralComment,
@@ -102,12 +165,19 @@ export type {
   SharedWalkthroughSnapshot,
   SubmittedReviewComment,
   SubmitPullRequestReviewResult,
+  ThreadAssessmentResult,
   WalkthroughShareManifestV1,
   WalkthroughHunk,
+  WalkthroughArtifactV5,
+  WalkthroughCapturedContext,
   WalkthroughGenerationProgress,
+  WalkthroughGenerationRequest,
   WalkthroughGenerationUnitProgress,
+  WalkthroughModel,
+  WalkthroughNarrativeV5,
   WalkthroughProgressEvent,
   WalkthroughProgressPhase,
+  WalkthroughRegion,
 } from './types.ts';
 export type {
   LocalReviewNote,

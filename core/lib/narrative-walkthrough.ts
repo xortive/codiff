@@ -1,9 +1,8 @@
 import type {
   ChangedFile,
   DiffSection,
-  NarrativeWalkthrough,
+  WalkthroughModel,
   WalkthroughChangeType,
-  WalkthroughChapter,
   WalkthroughHunk,
   WalkthroughHunkGroup,
   WalkthroughIcon,
@@ -23,14 +22,14 @@ type NarrativeLineCount = {
   diffAvailable?: false;
 };
 
-/** A stop with a global position in the walkthrough. */
-export type WalkthroughStopView = WalkthroughStop & {
+/** A normalized model stop with a global position in the walkthrough. */
+export type WalkthroughStopView = WalkthroughModel['chapters'][number]['stops'][number] & {
   chapterId: string;
   index: number;
 };
 
 /** A chapter with indexed stops. */
-type WalkthroughChapterView = Omit<WalkthroughChapter, 'stops'> & {
+type WalkthroughChapterView = Omit<WalkthroughModel['chapters'][number], 'stops'> & {
   stops: ReadonlyArray<WalkthroughStopView>;
 };
 
@@ -337,7 +336,7 @@ export const getUncoveredWalkthroughFileLineItems = (
     };
   });
 
-export const isWalkthroughCommittable = (walkthrough: NarrativeWalkthrough): boolean =>
+export const isWalkthroughCommittable = (walkthrough: WalkthroughModel): boolean =>
   walkthrough.source.type === 'working-tree';
 
 const groupSupportByReason = (
@@ -358,7 +357,7 @@ const groupSupportByReason = (
 };
 
 /** Build the walkthrough view-model with globally indexed stops. */
-export const buildWalkthroughView = (walkthrough: NarrativeWalkthrough): WalkthroughView | null => {
+export const buildWalkthroughView = (walkthrough: WalkthroughModel): WalkthroughView | null => {
   if (walkthrough.chapters.length === 0) {
     return null;
   }

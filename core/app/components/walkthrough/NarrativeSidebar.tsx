@@ -2,7 +2,6 @@ import { CheckIcon as Check } from '@phosphor-icons/react/Check';
 import { GitBranchIcon as GitBranch } from '@phosphor-icons/react/GitBranch';
 import { PathIcon as Path } from '@phosphor-icons/react/Path';
 import { ShareNetworkIcon as ShareNetwork } from '@phosphor-icons/react/ShareNetwork';
-import { renderInlineMarkdown } from '../../../lib/markdown.tsx';
 import {
   buildCommitModel,
   formatWalkthroughFileLineRows,
@@ -13,7 +12,7 @@ import {
   type WalkthroughView,
   type WalkthroughStopView,
 } from '../../../lib/narrative-walkthrough.ts';
-import type { ChangedFile, NarrativeWalkthrough } from '../../../types.ts';
+import type { ChangedFile, WalkthroughModel } from '../../../types.ts';
 import { ChapterIcon } from './parts.tsx';
 import type { NarrativeNavigation } from './useNarrativeNavigation.ts';
 
@@ -177,7 +176,7 @@ export function NarrativeSidebar({
   onShareWalkthrough?: () => void;
   shareWalkthroughDisabled?: boolean;
   showWhitespace: boolean;
-  walkthrough: NarrativeWalkthrough;
+  walkthrough: WalkthroughModel;
 }) {
   const { walkthroughView } = navigation;
   if (!walkthroughView) {
@@ -197,11 +196,6 @@ export function NarrativeSidebar({
 
   return (
     <div className="walkthrough-list">
-      <div className="wt-focus">
-        <span className="wt-focus-label">Review focus</span>
-        <p>{renderInlineMarkdown(walkthrough.focus)}</p>
-      </div>
-
       <div className="wt-toc-scroll">
         {walkthroughView.chapters.map((chapter) => (
           <div className="wt-toc-chapter" key={chapter.id}>

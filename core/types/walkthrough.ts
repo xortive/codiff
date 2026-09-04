@@ -1,14 +1,18 @@
 import type { CodiffPreferences } from '../types.ts';
+import type { GenerationMetadata } from './generation.ts';
 import type {
   PlanCommentThread,
   PullRequestExistingReviewComment,
   PullRequestGeneralCommentThread,
+  ReviewCommentPosition,
 } from './review-comments.ts';
 import type { CommitMetadata, PullRequestCodeQualityFinding } from './review-history.ts';
 import type {
   ChangedFile,
+  DiffRange,
   DiffSection,
   GitFileStatus,
+  GitSha,
   ResolvedReviewSource,
   ReviewSource,
 } from './review-identity.ts';
@@ -122,9 +126,21 @@ export type WalkthroughHunkGroup = {
   summary?: string;
   title?: string;
 };
+export type WalkthroughRegion = {
+  endLine: number;
+  hunkId: string;
+  id: string;
+  side: 'additions' | 'deletions';
+  startLine: number;
+  title: string;
+  tooltip: string;
+};
 export type WalkthroughStop = WalkthroughHunkGroup & {
   importance: 'critical' | 'normal' | 'context';
   prose: string;
+};
+export type WalkthroughStopV5 = WalkthroughStop & {
+  regions?: ReadonlyArray<WalkthroughRegion>;
 };
 export type WalkthroughSupportGroup = WalkthroughHunkGroup & { note?: string; reason: string };
 export type WalkthroughChapter = {
@@ -135,7 +151,11 @@ export type WalkthroughChapter = {
   title: string;
 };
 export type WalkthroughCommit = { body?: string; title?: string };
-export type NarrativeWalkthrough = {
+/**
+ * The released V4 persistence shape. This type is frozen: new walkthrough
+ * capabilities belong to V5 artifacts and the runtime model, never here.
+ */
+export type NarrativeWalkthroughV4 = {
   agent: 'codex' | 'claude' | 'opencode' | 'pi';
   chapters: ReadonlyArray<WalkthroughChapter>;
   commit?: WalkthroughCommit;
@@ -150,6 +170,224 @@ export type NarrativeWalkthrough = {
   title: string;
   version: 4;
 };
+
+/** Normalized code evidence captured before bounded prompt projection. */
+export type WalkthroughCapturedContext = {
+  branch: string | null;
+  files: ReadonlyArray<{
+    fingerprint: string;
+    generated?: boolean;
+    oldPath?: string;
+    path: string;
+    sections: ReadonlyArray<{
+      binary: boolean;
+      id: string;
+      kind: DiffSection['kind'];
+      loadState?: DiffSection['loadState'];
+      newFile?: { contents: string; name: string };
+      oldFile?: { contents: string; name: string };
+      patch: string;
+      range?: DiffRange;
+      summary?: DiffSection['summary'];
+    }>;
+    status: GitFileStatus;
+  }>;
+  /** Normalized review source stripped of live provider capabilities and state. */
+  source:
+    | { type: 'working-tree' }
+    | { sha: GitSha; type: 'commit' }
+    | { baseSha: GitSha; headSha: GitSha; ref: string; type: 'branch-diff' }
+    | { baseSha: GitSha; headSha: GitSha; ref: string; type: 'branch-working-tree' }
+    | { base: string; head: string; symmetric: boolean; type: 'range' }
+    | {
+        description?: string;
+        headSha?: GitSha;
+        number?: number;
+        projectPath?: string;
+        provider?: 'github' | 'gitlab';
+        targetBranch?: string;
+        title?: string;
+        type: 'pull-request';
+        url: string;
+      };
+};
+
+/** Authoritative choices for the initial single-call V5 authoring path. */
+export type WalkthroughGenerationRequest = {
+  customInstructions?: string;
+  review: {
+    relation: 'single-diff';
+    structure: 'single-diff';
+  };
+};
+
+/** The complete captured diff used by the current-review walkthrough. */
+export type AssessmentCodeScope = { type: 'single-diff' };
+
+export type AssessmentThreadAnchor = {
+  filePath: string;
+  lineNumber?: number;
+  position?: ReviewCommentPosition;
+  side?: 'additions' | 'deletions';
+  startLineNumber?: number;
+  startSide?: 'additions' | 'deletions';
+};
+
+export type AssessmentThreadComment = {
+  anchor?: AssessmentThreadAnchor;
+  author: { login: string; name?: string };
+  body: string;
+  id: string;
+  submittedAt?: string;
+};
+
+/** Provider-neutral semantic input for exactly one current-review thread. */
+export type AssessmentInput = {
+  codeScope: AssessmentCodeScope;
+  thread: {
+    comments: ReadonlyArray<AssessmentThreadComment>;
+    id: string;
+  };
+};
+
+export type AssessmentIdentity = {
+  codeScope: AssessmentCodeScope;
+  threadId: string;
+};
+
+export type AssessmentCapturedPresentationState = {
+  threadState: 'open' | 'resolved';
+};
+
+export type ThreadAssessmentResult = {
+  disposition:
+    | 'addressed'
+    | 'partially-addressed'
+    | 'still-applies'
+    | 'no-longer-applicable'
+    | 'unclear';
+  explanation: string;
+};
+
+export type AssessmentOutcome =
+  | {
+      generationMetadata: GenerationMetadata;
+      result: ThreadAssessmentResult;
+      status: 'ready';
+    }
+  | { error: string; status: 'failed' };
+
+/** One independently replaceable thread assessment. */
+export type AssessmentComponent = {
+  capturedPresentationState: AssessmentCapturedPresentationState;
+  identity: AssessmentIdentity;
+  input: AssessmentInput;
+  outcome: AssessmentOutcome;
+};
+
+/** Absence means assessment was not requested; an empty list means none were eligible. */
+export type AssessmentCollection = {
+  items: ReadonlyArray<AssessmentComponent>;
+};
+
+/** The initial single-call narrative stored inside a V5 artifact envelope. */
+export type WalkthroughNarrativeV5 = Omit<
+  NarrativeWalkthroughV4,
+  'chapters' | 'repo' | 'source' | 'version'
+> & {
+  chapters: ReadonlyArray<
+    Omit<WalkthroughChapter, 'stops'> & { stops: ReadonlyArray<WalkthroughStopV5> }
+  >;
+  generationMetadata: GenerationMetadata;
+  /** Display identity only; persisted V5 never contains a checkout-local root. */
+  repo: { branch: string | null };
+  source: WalkthroughCapturedContext['source'];
+  structure: 'single-diff';
+};
+
+/**
+ * The initial persisted V5 artifact boundary.
+ *
+ * The narrative deliberately starts with V4-equivalent behavior. Captured
+ * context and generation request are artifact-owned capability positions that
+ * later authoring revisions can populate without changing frozen V4 storage.
+ */
+export type WalkthroughArtifactV5 = {
+  /** Background-generated components stored independently from narrative content. */
+  assessments?: AssessmentCollection;
+  /** Sanitized, host-neutral context captured before prompt projection. */
+  capturedContext: WalkthroughCapturedContext;
+  /** Resolved review selection and authoring choices for this artifact. */
+  generationRequest: WalkthroughGenerationRequest;
+  /** Model-authored content; artifact lifecycle state does not live here. */
+  narrative: WalkthroughNarrativeV5;
+  version: 5;
+};
+
+type Immutable<T> = T extends (...arguments_: Array<never>) => unknown
+  ? T
+  : T extends ReadonlyArray<infer Item>
+    ? ReadonlyArray<Immutable<Item>>
+    : T extends object
+      ? { readonly [Key in keyof T]: Immutable<T[Key]> }
+      : T;
+
+/**
+ * Core's immutable, document-derived rendering and navigation representation.
+ *
+ * Persisted JSON is normalized exactly once at the Core trust boundary. The
+ * model is never serialized as V4 or V5, and `sourceVersion` is diagnostic
+ * only. Rendering and reuse decisions must narrow optional capability fields
+ * instead of checking the source document version. Live provider state stays
+ * separate from this captured model.
+ */
+export type WalkthroughModel = Immutable<Omit<NarrativeWalkthroughV4, 'chapters' | 'version'>> & {
+  /** Present only when the artifact included current-review assessments. */
+  readonly assessments?: Immutable<AssessmentCollection>;
+  /** Present only when the source artifact supplied captured-context capability. */
+  readonly capturedContext?: Immutable<WalkthroughArtifactV5['capturedContext']>;
+  readonly chapters: Immutable<WalkthroughNarrativeV5['chapters']>;
+  /** Present only for V5 model-produced narrative content. */
+  readonly generationMetadata?: Immutable<GenerationMetadata>;
+  /** Present only when the source artifact supplied generation-request capability. */
+  readonly generationRequest?: Immutable<WalkthroughArtifactV5['generationRequest']>;
+  /** Informational persisted document version; never a capability gate. */
+  readonly sourceVersion: 4 | 5;
+  /** Present only for V5; later revisions extend the structure union. */
+  readonly structure?: 'single-diff';
+};
+
+/** Transient provider state joined only for live assessment presentation. */
+export type LiveReviewState = {
+  currentThreadStateById?: ReadonlyMap<string, 'open' | 'resolved'>;
+  pendingAssessmentThreadIds?: ReadonlySet<string>;
+};
+
+export type NarrativeWalkthroughUpdate = {
+  cacheKey: string;
+  pendingAssessmentThreadIds: ReadonlyArray<string>;
+  walkthrough: WalkthroughArtifactV5;
+};
+
+/** Frozen name retained for V4-producing hosts until their explicit V5 integration. */
+export type NarrativeWalkthrough = NarrativeWalkthroughV4;
+
+/** Persisted walkthrough documents accepted at host and sharing boundaries. */
+export type PersistedWalkthrough = NarrativeWalkthroughV4 | WalkthroughArtifactV5;
+
+/** Capability checks are field-based so model behavior is independent of document labels. */
+export const hasCapturedContextCapability = (
+  walkthrough: WalkthroughModel,
+): walkthrough is WalkthroughModel & {
+  readonly capturedContext: Immutable<WalkthroughArtifactV5['capturedContext']>;
+} => 'capturedContext' in walkthrough;
+
+/** Capability checks are field-based so later request shapes do not require version branches. */
+export const hasGenerationRequestCapability = (
+  walkthrough: WalkthroughModel,
+): walkthrough is WalkthroughModel & {
+  readonly generationRequest: Immutable<WalkthroughArtifactV5['generationRequest']>;
+} => 'generationRequest' in walkthrough;
 
 export type SharedWalkthroughSnapshot = {
   branch: string | null;
@@ -171,7 +409,7 @@ export type SharedWalkthroughSnapshot = {
   };
   reviewComments?: ReadonlyArray<PullRequestExistingReviewComment>;
   version: 1;
-  walkthrough: NarrativeWalkthrough;
+  walkthrough: PersistedWalkthrough;
 };
 export type SharedPlanSnapshot = {
   codiffVersion: string;
