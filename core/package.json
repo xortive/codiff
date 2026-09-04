@@ -1,6 +1,6 @@
 {
   "name": "@nkzw/codiff-core",
-  "version": "1.10.1",
+  "version": "1.12.1",
   "description": "A fast diff viewer.",
   "license": "MIT",
   "author": {
@@ -13,7 +13,15 @@
     "directory": "core"
   },
   "files": [
-    "dist"
+    "dist",
+    "*.css",
+    "*.ts",
+    "*.tsx",
+    "app",
+    "config",
+    "fonts",
+    "lib",
+    "types"
   ],
   "type": "module",
   "sideEffects": [
@@ -44,25 +52,35 @@
       "@nkzw/codiff-source": "./App.css",
       "default": "./dist/style.css"
     },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "@nkzw/codiff-source": "./types.ts",
+      "default": "./dist/types.d.ts"
+    },
     "./walkthrough": {
       "types": "./dist/lib/narrative-walkthrough-diff.d.ts",
       "@nkzw/codiff-source": "./lib/narrative-walkthrough-diff.js",
       "default": "./dist/lib/narrative-walkthrough-diff.mjs"
+    },
+    "./walkthrough-generation": {
+      "types": "./dist/walkthrough-generation.d.ts",
+      "@nkzw/codiff-source": "./walkthrough-generation.ts",
+      "default": "./dist/walkthrough-generation.mjs"
     }
   },
   "scripts": {
-    "build": "rm -rf dist && vp pack -d dist --target=node24 index.ts react.ts share.ts lib/narrative-walkthrough-diff.js App.css && vp exec tsc -p tsconfig.build.json"
+    "build": "rm -rf dist && vp pack -d dist --target=node24 index.ts react.ts share.ts walkthrough-generation.ts lib/narrative-walkthrough-diff.js App.css && vp exec tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@nkzw/mdx-editor": "^0.2.2",
+    "@nkzw/mdx-editor": "^1.0.1",
     "@nkzw/use-relative-time": "^1.2.3",
     "@phosphor-icons/react": "^2.1.10",
-    "@pierre/diffs": "1.3.0-beta.9",
-    "@pierre/trees": "1.0.0-beta.5",
+    "@pierre/diffs": "1.3.6",
+    "@pierre/trees": "1.0.0-beta.6",
     "@radix-ui/react-slot": "^1.3.3",
     "class-variance-authority": "^0.7.1",
     "ghostty-web": "^0.4.0",
-    "lucide-react": "^1.26.0",
+    "lucide-react": "^1.39.0",
     "valibot": "^1.4.2"
   },
   "peerDependencies": {

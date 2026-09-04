@@ -7,10 +7,14 @@ import type {
   CodiffMarkdownDocument,
   CodiffPreferences,
   CodiffUpdateStatus,
+  DefinitionSearchRequest,
+  DefinitionSearchResult,
   DiffImageContentRequest,
   DiffImageContentResult,
   DiffSection,
   DiffSectionContentRequest,
+  DiffSectionsContentRequest,
+  DiffSectionsContentResult,
   GitIdentity,
   NarrativeWalkthroughRequestOptions,
   NarrativeWalkthroughResult,
@@ -19,6 +23,7 @@ import type {
   PlanReview,
   RepositoryHistory,
   RepositoryState,
+  ResolvedReviewSource,
   ReviewAssistantRequest,
   ReviewAssistantResult,
   ReviewSource,
@@ -28,8 +33,12 @@ import type {
   SharedWalkthroughSnapshot,
   ShareWalkthroughResult,
   SubmitPullRequestCommentRequest,
+  PullRequestGeneralCommentThread,
   PullRequestExistingReviewComment,
+  RevisionContentBatchRequest,
+  RevisionContentBatchResult,
   SubmitPullRequestReviewRequest,
+  SubmitPullRequestReviewResult,
   TerminalHelperStatus,
   WalkthroughCommitMessageRequest,
   WalkthroughCommitMessageResult,
@@ -45,16 +54,17 @@ declare global {
     codiff: {
       applyUpdate: () => Promise<CodiffUpdateStatus>;
       askReviewAssistant: (request: ReviewAssistantRequest) => Promise<ReviewAssistantResult>;
+      cancelDiffContentRequest: (requestId: string) => void;
+      cancelNarrativeWalkthrough: () => Promise<void>;
       completePlan: (review: PlanReview, status: PlanHandoffStatus) => Promise<void>;
       createWalkthroughCommit: (
         request: WalkthroughCommitRequest,
       ) => Promise<WalkthroughCommitResult>;
       decreaseCodeFontSize: () => Promise<void>;
       dismissUpdate: () => Promise<CodiffUpdateStatus>;
+      findDefinitions: (request: DefinitionSearchRequest) => Promise<DefinitionSearchResult>;
       getAgentSkillStatus: () => Promise<AgentSkillStatus>;
       getConfig: () => Promise<CodiffConfig>;
-      getDiffImageContent: (request: DiffImageContentRequest) => Promise<DiffImageContentResult>;
-      getDiffSectionContent: (request: DiffSectionContentRequest) => Promise<DiffSection>;
       getFeatureFlags: () => Promise<CodiffFeatureFlags>;
       getGitIdentity: () => Promise<GitIdentity>;
       getKeyboardLayout: () => Promise<NativeKeyboardLayout | null>;
@@ -64,13 +74,20 @@ declare global {
         path: string;
       }) => Promise<CodiffMarkdownDocument>;
       getNarrativeWalkthrough: (
-        source?: ReviewSource,
+        source?: ResolvedReviewSource,
         options?: NarrativeWalkthroughRequestOptions,
       ) => Promise<NarrativeWalkthroughResult>;
       getPlanReview: () => Promise<PlanReview | null>;
       getPreferences: () => Promise<CodiffPreferences>;
       getRepositoryHistory: (limit?: number, source?: ReviewSource) => Promise<RepositoryHistory>;
       getRepositoryState: (source?: ReviewSource) => Promise<RepositoryState>;
+      getReviewComments: (
+        source: Extract<ReviewSource, { type: 'pull-request' }>,
+        requestId?: string,
+      ) => Promise<{
+        generalComments: ReadonlyArray<PullRequestGeneralCommentThread>;
+        reviewComments: ReadonlyArray<PullRequestExistingReviewComment>;
+      }>;
       getTerminalHelperStatus: () => Promise<TerminalHelperStatus>;
       getUpdateStatus: () => Promise<CodiffUpdateStatus>;
       increaseCodeFontSize: () => Promise<void>;
@@ -98,9 +115,15 @@ declare global {
       onWalkthroughProgress: (callback: (progress: WalkthroughProgressEvent) => void) => () => void;
       onWindowFullScreenChanged: (callback: (isFullScreen: boolean) => void) => () => void;
       openConfigFile: () => Promise<void>;
-      openFile: (path: string) => Promise<void>;
+      openFile: (path: string, lineNumber?: number) => Promise<void>;
       openReleasePage: () => Promise<void>;
       openRepositoryFolder: () => Promise<void>;
+      readRevisionContent: (
+        request: RevisionContentBatchRequest,
+      ) => Promise<RevisionContentBatchResult>;
+      reportInitialLoadMilestone: (
+        name: 'deferred-review-data-complete' | 'first-usable-review-rendered',
+      ) => void;
       resetCodeFontSize: () => Promise<void>;
       resolvePullRequestUrl: (value: string) => Promise<string>;
       saveMarkdownDocument: (
@@ -116,7 +139,9 @@ declare global {
       submitPullRequestComment: (
         request: SubmitPullRequestCommentRequest,
       ) => Promise<PullRequestExistingReviewComment>;
-      submitPullRequestReview: (request: SubmitPullRequestReviewRequest) => Promise<void>;
+      submitPullRequestReview: (
+        request: SubmitPullRequestReviewRequest,
+      ) => Promise<SubmitPullRequestReviewResult>;
       updateWalkthroughCommitMessage: (
         request: WalkthroughCommitMessageRequest,
       ) => Promise<WalkthroughCommitMessageResult>;

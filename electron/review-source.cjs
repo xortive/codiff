@@ -1,6 +1,6 @@
 // @ts-check
 
-const { execFileSync } = require('node:child_process');
+const { gitSync } = require('./git-state/common.cjs');
 
 /** @typedef {'github' | 'gitlab'} ReviewProvider */
 
@@ -106,7 +106,10 @@ const parseRemoteUrl = (value) => {
     const projectPath = url.pathname.replaceAll(/^\/+|\.git$/gi, '');
     return projectPath
       ? {
-          host: url.host.toLowerCase(),
+          // A custom SSH port (`ssh://git@host:2222/...`) is transport detail, not part
+          // of the instance identifier, and glab's `--hostname` rejects `host:port` —
+          // strip it. An explicit port on `https://` remotes stays: it identifies the instance.
+          host: (url.protocol === 'ssh:' ? url.hostname : url.host).toLowerCase(),
           projectPath,
           provider: /** @type {ReviewProvider} */ (
             url.hostname.toLowerCase() === 'github.com' ? 'github' : 'gitlab'
@@ -120,10 +123,8 @@ const parseRemoteUrl = (value) => {
 
 /** @param {string} repositoryPath */
 const readReviewRemotes = (repositoryPath) => {
-  const root = execFileSync('git', ['-C', repositoryPath, 'rev-parse', '--show-toplevel'], {
-    encoding: 'utf8',
-  }).trim();
-  const raw = execFileSync('git', ['-C', root, 'remote', '-v'], { encoding: 'utf8' });
+  const root = gitSync(repositoryPath, ['rev-parse', '--show-toplevel']).trim();
+  const raw = gitSync(root, ['remote', '-v']);
   const remotes = [];
   for (const line of raw.split('\n')) {
     const match = line.match(/^(\S+)\s+(\S+)\s+\((fetch|push)\)$/);
@@ -175,6 +176,7 @@ const resolveReviewUrl = (repositoryPath, number, provider) => {
 };
 
 module.exports = {
+  parseRemoteUrl,
   parseReviewUrl,
   readReviewRemotes,
   resolveReviewUrl,

@@ -163,6 +163,42 @@ export const codeViewUnsafeCSS = `
     cursor: progress;
   }
 
+  :host([data-codiff-definition-mode]) [data-codiff-identifier] {
+    cursor: pointer;
+    text-decoration-color: color-mix(in srgb, currentColor 38%, transparent);
+    text-decoration-line: underline;
+    text-decoration-style: dotted;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+  }
+
+  :host([data-codiff-definition-mode]) [data-codiff-identifier]:hover {
+    text-decoration-color: currentColor;
+    text-decoration-style: solid;
+  }
+
+  :host(.codiff-loading-context-item) [data-expand-index] {
+    cursor: progress;
+    opacity: 0.72;
+    pointer-events: none;
+  }
+
+  :host(.codiff-loading-context-item) [data-expand-index]::after {
+    animation: codiff-context-spin 0.8s linear infinite;
+    border: 2px solid color-mix(in srgb, currentColor 24%, transparent);
+    border-radius: 50%;
+    border-top-color: currentColor;
+    content: '';
+    display: inline-block;
+    height: 10px;
+    margin-left: 6px;
+    vertical-align: -1px;
+    width: 10px;
+  }
+
+  @keyframes codiff-context-spin {
+    to { transform: rotate(360deg); }
+  }
   .codiff-search-mark {
     background: var(--diffs-find-highlight-bg, rgb(255 216 92 / 0.65));
     border-radius: 3px;
