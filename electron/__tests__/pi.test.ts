@@ -16,6 +16,7 @@ const {
   FALLBACK_PI_MODEL,
   PI_MODELS,
   PI_NOT_FOUND_CODE,
+  PI_TIMEOUT_MS,
   getPiCommand,
   isPiNotFoundError,
   normalizePiModel,
@@ -25,6 +26,7 @@ const {
   FALLBACK_PI_MODEL: string;
   PI_MODELS: ReadonlyArray<{ id: string; label: string }>;
   PI_NOT_FOUND_CODE: string;
+  PI_TIMEOUT_MS: number;
   getPiCommand: () => string;
   isPiNotFoundError: (error: unknown) => boolean;
   normalizePiModel: (value: unknown) => string;
@@ -56,6 +58,7 @@ test('exposes the Pi default model identifier', () => {
   expect(DEFAULT_PI_MODEL).toBe('pi-default');
   expect(FALLBACK_PI_MODEL).toBe('pi-default');
   expect(PI_NOT_FOUND_CODE).toBe('PI_NOT_FOUND');
+  expect(PI_TIMEOUT_MS).toBe(1_200_000);
 });
 
 test('exposes a static Pi model list', () => {
@@ -127,6 +130,7 @@ process.stdin.on('end', () => {
   expect(args).toContain('--no-skills');
   expect(args).toContain('--no-prompt-templates');
   expect(args).toContain('--no-context-files');
+  expect(args[args.indexOf('--thinking') + 1]).toBe('low');
   expect(args).toContain('--tools');
   expect(args).toContain('read,grep,find,ls');
   expect(args).not.toContain('--model');

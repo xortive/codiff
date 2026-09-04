@@ -1,6 +1,7 @@
 // @ts-check
 
 const { getCurrentCommandSignal, git } = require('./common.cjs');
+const { addHistoryDiffStats } = require('./commit-metadata.cjs');
 const {
   createGitLabPosition,
   createGitLabReviewMutations,
@@ -433,13 +434,20 @@ const listMergeRequestHistory = async (launchPath, source, limit = 200) => {
   const baseCommits = metadata.target_branch
     ? await readRepositoryCommits(repoRoot, mergeRequest, metadata.target_branch, limit, transport)
     : [];
+  const mergeRequestEntries = commits
+    .map((commit) => normalizeGitLabCommit(commit, 'pull-request'))
+    .filter(Boolean)
+    .reverse();
+  const baseEntries = baseCommits
+    .map((commit) => normalizeGitLabCommit(commit, 'base'))
+    .filter(Boolean);
   return {
     entries: [
-      ...commits
-        .map((commit) => normalizeGitLabCommit(commit, 'pull-request'))
-        .filter(Boolean)
-        .reverse(),
-      ...baseCommits.map((commit) => normalizeGitLabCommit(commit, 'base')).filter(Boolean),
+      ...(await addHistoryDiffStats(repoRoot, [
+        ...mergeRequestEntries,
+        ...baseEntries.slice(0, 1),
+      ])),
+      ...baseEntries.slice(1),
     ],
     root: repoRoot,
   };

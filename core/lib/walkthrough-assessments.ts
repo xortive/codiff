@@ -150,8 +150,20 @@ export const createAssessmentDemandsFromSelections = ({
   });
 
 const scopeFiles = (input: AssessmentInput, context: WalkthroughCapturedContext) => {
-  void input;
-  return context.files;
+  const scope = input.codeScope;
+  if (scope.type !== 'commit') {
+    return context.files;
+  }
+  return context.files.flatMap((file) => {
+    const sections = file.sections.filter(
+      (section) =>
+        section.range != null &&
+        section.range.head != null &&
+        'sha' in section.range.head &&
+        section.range.head.sha === scope.sha,
+    );
+    return sections.length > 0 ? [{ ...file, sections }] : [];
+  });
 };
 
 /** Deterministic bounded prompt projection for exactly one assessment input. */

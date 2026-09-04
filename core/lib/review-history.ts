@@ -1,4 +1,53 @@
-import type { DiffRange, GitSha, Revision } from '../types.ts';
+import type {
+  DiffComparison,
+  DiffRange,
+  GitSha,
+  ReviewPlan,
+  ReviewUnit,
+  Revision,
+  RevisionLabel,
+  TargetComparisonReviewStructure,
+} from '../types.ts';
+
+export const commitRevisionLabel = (text: string, url?: string): RevisionLabel => ({
+  kind: 'commit',
+  text,
+  ...(url ? { url } : {}),
+});
+
+export const versionRevisionLabel = (text: string, url?: string): RevisionLabel => ({
+  kind: 'version',
+  text,
+  ...(url ? { url } : {}),
+});
+
+export const revisionRef = (
+  sha: GitSha,
+  label: RevisionLabel,
+  aliases?: ReadonlyArray<RevisionLabel>,
+): Extract<Revision, { kind?: 'commit' }> => ({
+  label,
+  sha,
+  ...(aliases?.length ? { aliases } : {}),
+});
+
+export const indexRevision = (
+  label: RevisionLabel = { kind: 'review-marker', text: 'Index' },
+  aliases?: ReadonlyArray<RevisionLabel>,
+): Extract<Revision, { kind: 'index' }> => ({
+  kind: 'index',
+  label,
+  ...(aliases?.length ? { aliases } : {}),
+});
+
+export const workingCopyRevision = (
+  label: RevisionLabel = { kind: 'review-marker', text: 'Working copy' },
+  aliases?: ReadonlyArray<RevisionLabel>,
+): Extract<Revision, { kind: 'working-copy' }> => ({
+  kind: 'working-copy',
+  label,
+  ...(aliases?.length ? { aliases } : {}),
+});
 
 export const isCommitRevision = (
   revision: Revision | null,
@@ -16,3 +65,26 @@ export const diffRange = (base: Revision | null, head: Revision | null): DiffRan
   base,
   head,
 });
+
+export const diffComparison = (before: DiffRange, after: DiffRange): DiffComparison => ({
+  after,
+  before,
+});
+
+export const resolveReviewPlan = ({
+  structure,
+  units,
+}: {
+  structure: TargetComparisonReviewStructure;
+  units?: ReadonlyArray<ReviewUnit>;
+}): ReviewPlan => {
+  if (structure === 'net-change') {
+    return { reviewRelation: 'target-comparison', structure: 'net-change' };
+  }
+
+  return {
+    reviewRelation: 'target-comparison',
+    structure: 'commit-by-commit',
+    units: units ?? [],
+  };
+};

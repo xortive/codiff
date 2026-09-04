@@ -7,13 +7,11 @@ const {
   readFileSync,
   renameSync,
   rmSync,
-  statSync,
   writeFileSync,
 } = require('node:fs');
 const { homedir } = require('node:os');
 const { join } = require('node:path');
 
-const MAX_STORED_WALKTHROUGH_BYTES = 8 * 1024 * 1024;
 const STORED_WALKTHROUGH_VERSION = 1;
 
 const getWalkthroughStoreDir = () => join(homedir(), '.codiff', 'walkthroughs');
@@ -120,9 +118,6 @@ const readStoredWalkthrough = (cacheKey) => {
   }
 
   try {
-    if (statSync(path).size > MAX_STORED_WALKTHROUGH_BYTES) {
-      return null;
-    }
     const text = readFileSync(path, 'utf8');
     const record = JSON.parse(text);
     if (

@@ -138,9 +138,9 @@ const normalizeNarrativeWalkthrough = async (
     },
     hunkIdByAlias,
   );
-  const narrative = walkthrough.narrative;
-  if (facts.context && typeof facts.context === 'object' && !narrative.context) {
-    narrative.context = facts.context;
+  const content = walkthrough.narrative.content;
+  if (facts.context && typeof facts.context === 'object' && !content.context) {
+    content.context = facts.context;
   }
 
   // A commit composer only makes sense for a live staging set — never a past
@@ -165,9 +165,9 @@ const normalizeNarrativeWalkthrough = async (
     if (title) commit.title = title;
     const body = stripLeadingCommitTitle(rawBody, title);
     if (body) commit.body = body;
-    narrative.commit = commit;
+    content.commit = commit;
   } else {
-    delete narrative.commit;
+    delete content.commit;
   }
 
   return walkthrough;
@@ -195,7 +195,7 @@ const buildPreviousWalkthroughInput = (previousWalkthrough) => {
   }
 
   const persisted = /** @type {any} */ (previousWalkthrough);
-  const walkthrough = persisted.version === 5 ? persisted.narrative : persisted;
+  const walkthrough = persisted.version === 5 ? persisted.narrative?.content : persisted;
   if (!walkthrough || typeof walkthrough !== 'object') {
     return '';
   }
@@ -267,7 +267,8 @@ const resolveNarrativeWalkthroughModel = (state, agent, model) => {
 
 /**
  * Small walkthroughs retain the normal agent timeout. Larger digests get more
- * time for hunk classification and structured output, capped at five minutes.
+ * time for hunk classification and structured output. The size-based estimate
+ * is capped at five minutes, but a slower agent's own minimum is always honored.
  *
  * @param {RepositoryState} state
  * @param {number} [minimumMs]
@@ -279,7 +280,7 @@ const getNarrativeWalkthroughTimeoutMs = (state, minimumMs = BASE_WALKTHROUGH_TI
     Math.max(0, fileCount - INCLUDED_WALKTHROUGH_FILES) * TIMEOUT_MS_PER_EXTRA_FILE +
     Math.max(0, hunkCount - INCLUDED_WALKTHROUGH_HUNKS) * TIMEOUT_MS_PER_EXTRA_HUNK;
 
-  return Math.min(MAX_WALKTHROUGH_TIMEOUT_MS, Math.max(minimumMs, estimatedMs));
+  return Math.max(minimumMs, Math.min(MAX_WALKTHROUGH_TIMEOUT_MS, estimatedMs));
 };
 
 const buildNarrativeWalkthroughRequest = async (
@@ -435,8 +436,8 @@ const readNarrativeWalkthrough = async (
       },
       request.hunkIdByAlias,
     );
-    if (context && !walkthrough.narrative.context) {
-      walkthrough.narrative.context = context;
+    if (context && !walkthrough.narrative.content.context) {
+      walkthrough.narrative.content.context = context;
     }
 
     return {

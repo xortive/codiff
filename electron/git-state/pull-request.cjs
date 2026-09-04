@@ -1,6 +1,7 @@
 // @ts-check
 
 const { git, gitOrEmpty, getCurrentCommandSignal } = require('./common.cjs');
+const { addHistoryDiffStats } = require('./commit-metadata.cjs');
 const { rangeArtifactToPullRequestFiles } = require('./review-range-sections.cjs');
 const { createGhGitHubTransport, runGhApi } = require('./github-history/gh-github-transport.cjs');
 const {
@@ -674,15 +675,17 @@ const listPullRequestHistory = async (launchPath, source, limit = 200) => {
   const baseCommits = metadata.base?.sha
     ? await readRepositoryCommits(repoRoot, pullRequest, metadata.base.sha, limit)
     : [];
+  const pullRequestEntries = commits
+    .map(normalizeGitHubPullRequestCommit)
+    .filter((entry) => entry != null)
+    .reverse();
+  const baseEntries = baseCommits
+    .map((commit) => normalizeGitHubCommit(commit, 'base'))
+    .filter((entry) => entry != null);
   return {
     entries: [
-      ...commits
-        .map(normalizeGitHubPullRequestCommit)
-        .filter((entry) => entry != null)
-        .reverse(),
-      ...baseCommits
-        .map((commit) => normalizeGitHubCommit(commit, 'base'))
-        .filter((entry) => entry != null),
+      ...(await addHistoryDiffStats(repoRoot, [...pullRequestEntries, ...baseEntries.slice(0, 1)])),
+      ...baseEntries.slice(1),
     ],
     root: repoRoot,
   };

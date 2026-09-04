@@ -13,9 +13,10 @@ const {
   oneLine,
 } = require('./agent-shared.cjs');
 
-// Pi can take longer than Codex/Claude because it may use read-only repository
-// tools before producing a structured answer.
-const PI_TIMEOUT_MS = 180_000;
+// Large structured walkthroughs still need a generous wall-clock cap, even
+// though Codiff pins Pi to the same low reasoning effort used by Codex.
+const PI_TIMEOUT_MS = 1_200_000;
+const PI_THINKING_LEVEL = 'low';
 const DEFAULT_PI_MODEL = 'pi-default';
 const FALLBACK_PI_MODEL = 'pi-default';
 const PI_NOT_FOUND_CODE = 'PI_NOT_FOUND';
@@ -144,6 +145,8 @@ const runPi = async (
         '--no-skills',
         '--no-prompt-templates',
         '--no-context-files',
+        '--thinking',
+        PI_THINKING_LEVEL,
         '--tools',
         'read,grep,find,ls',
         ...(model === DEFAULT_PI_MODEL ? [] : ['--model', model]),
